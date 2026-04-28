@@ -1,0 +1,13 @@
+**/.vs
+**/bin
+**/obj
+**/.git
+**/.gitignore
+**/node_modules
+**/Thumbs.db
+**/*.user
+**/*.suo
+**/docker-compose*
+**/*.md
+**/Maono.Api.Tests
+**/.gemini
