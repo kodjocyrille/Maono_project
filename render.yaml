@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: maono-api
+    runtime: docker
+    region: frankfurt
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://+:10000
+      - key: ConnectionStrings__DefaultConnection
+        sync: false  # Set manually in Render dashboard
+      - key: Jwt__Secret
+        generateValue: true
+        length: 64

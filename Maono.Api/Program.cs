@@ -82,19 +82,20 @@ await Maono.Infrastructure.Seeding.DatabaseSeeder.SeedAsync(app.Services);
 // Middleware pipeline
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+// Expose OpenAPI JSON document at /openapi/v1.json
+app.MapOpenApi();
+
+// Swagger UI
+app.UseSwaggerUI(options =>
+{
+    options.SwaggerEndpoint("/openapi/v1.json", "Maono API v1");
+});
+
+// HTTPS redirection handled by Render's load balancer
 if (app.Environment.IsDevelopment())
 {
-    // Expose OpenAPI JSON document at /openapi/v1.json
-    app.MapOpenApi();
-
-    // Swagger UI — pointed at the built-in OpenAPI document
-    app.UseSwaggerUI(options =>
-    {
-        options.SwaggerEndpoint("/openapi/v1.json", "Maono API v1");
-    });
+    app.UseHttpsRedirection();
 }
-
-app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
