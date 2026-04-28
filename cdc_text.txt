@@ -1,0 +1,815 @@
+﻿
+
+MAONO
+
+Editorial Operations Platform
+
+
+
+
+CAHIER DES CHARGES FONCTIONNEL
+
+Version 2.0 — Avril 2026
+
+Document confidentiel — Usage interne
+
+
+
+
+1. Objet du Document
+
+Le présent Cahier des Charges Fonctionnel (CdCF) définit l&apos;ensemble des exigences fonctionnelles du système Editorial Ops, module central de la plateforme Maono. Il constitue le document de référence pour toutes les parties prenantes : équipes design, développement, product management et direction.
+
+Ce document couvre :
+
+
+La description fonctionnelle complète de toutes les features du système
+
+
+Les workflows métier et les règles de gestion
+
+
+Les rôles, responsabilités et droits d&apos;accès
+
+
+Les user stories par profil utilisateur
+
+
+Les critères d&apos;acceptation par fonctionnalité
+
+
+Les gaps identifiés et les recommandations pour les versions futures
+
+
+
+
+
+
+2. Contexte &amp; Vision Produit
+
+
+2.1 Problème métier
+
+Les agences de contenu et les freelances évoluent dans un environnement fragmenté : briefs par email, validations client par WhatsApp, assets sur Google Drive, plannings sur Notion. Cette fragmentation génère :
+
+
+Des livrables oubliés et des deadlines manquées
+
+
+Une absence de traçabilité sur les décisions et révisions
+
+
+Une surcharge cognitive pour les équipes de production
+
+
+Un risque légal en l&apos;absence d&apos;historique d&apos;approbation
+
+
+2.2 Vision produit
+
+Maono Editorial Ops est une plateforme unifiée de gestion des opérations éditoriales, couvrant l&apos;intégralité du cycle de vie du contenu — de la stratégie à la publication — pour des agences multi-clients et des freelances opérant en mode SaaS.
+
+Promesse produit :
+
+
+Zéro livrable oublié. Zéro deadline manquée. Traçabilité totale.
+
+
+2.3 Périmètre fonctionnel v1
+
+Le périmètre de la version 1 couvre les six domaines suivants :
+Domaine
+Description
+Gestion de campagne
+Création, planification et suivi des campagnes éditoriales par client
+Calendrier éditorial
+Planification visuelle du contenu par plateforme et date de publication
+Production de contenu
+Workflow de production multi-équipes avec dépendances et briefs
+Validation &amp; approbation
+Chaîne d&apos;approbation interne puis client avec historique
+Publication
+Scheduling et publication multi-plateformes sociales
+Reporting &amp; performance
+Dashboard de performance par contenu et par campagne
+
+
+
+
+
+
+3. Rôles &amp; Responsabilités
+
+
+3.1 Matrice des rôles
+Rôle
+Responsabilités principales
+Droits système
+Stratège
+Définir la direction de campagne, les KPIs, valider le calendrier éditorial
+Lecture/écriture campagne, validation calendrier
+Planificateur
+Construire et maintenir le calendrier, affecter les tâches, gérer les dépendances
+Lecture/écriture calendrier et contenus
+Designer
+Créer les visuels, respecter la charte graphique, uploader les assets
+Lecture tâches assignées, écriture assets
+Photographe / Vidéaste
+Produire les assets media, livrer raw et édité dans les délais
+Lecture tâches assignées, écriture assets
+Social Media Manager
+Publier le contenu validé, monitorer l&apos;engagement
+Lecture/écriture publication, lecture métriques
+Client
+Approuver ou rejeter le contenu avec commentaire obligatoire
+Lecture preview, écriture statut approbation
+Admin
+Configurer les workspaces, gérer les accès, superviser tous les modules
+Accès complet
+
+
+3.2 Rôles SaaS Freelance
+Profil freelance
+Périmètre fonctionnel
+Community Manager
+Calendrier éditorial, scheduling, monitoring engagement, communication client
+Graphic Designer
+Réception de briefs, upload d&apos;assets, gestion des versions, révisions
+Vidéaste
+Suivi des productions vidéo, livraison par jalons, tracking deadlines
+Photographe
+Gestion de shoots, livraison raw + édité, versioning par mission
+Copywriter
+Production de textes, alignement brief, révisions balisées
+
+
+
+
+
+
+4. Workflows Métier
+
+
+4.1 Flux éditorial principal
+
+Le workflow principal suit six étapes séquentielles avec des processus parallèles possibles en production :
+
+Stratégie → Planification → Production → Validation → Publication → Reporting
+
+
+Étape 1 — Définition stratégique
+
+Réalisée par le Stratège. Produit : document de stratégie éditoriale et brief de campagne.
+
+
+Définition des objectifs de campagne et des messages clés
+
+
+Sélection des plateformes cibles et de la fréquence de publication
+
+
+Définition des KPIs et des critères de succès
+
+
+Validation formelle avant transmission au Planificateur
+
+
+Étape 2 — Planification éditoriale
+
+Réalisée par le Planificateur. Produit : entrées de calendrier éditorial.
+
+
+Création des entrées par plateforme, date, type de contenu et thème
+
+
+Affectation des ressources par type de production
+
+
+Définition des dépendances entre tâches (ex : Copywriting → Design → Review)
+
+
+Validation du calendrier par le Stratège avant lancement de production
+
+
+Étape 3 — Production de contenu
+
+Réalisée par les équipes de production. Chaque tâche inclut un brief attaché, une deadline et des dépendances explicites.
+
+
+Graphic Design — visuels statiques et animés
+
+
+Photographie — assets photo RAW et post-traités
+
+
+Production vidéo — rushes et montages finaux
+
+
+Copywriting — textes, légendes, scripts
+
+
+Étape 4 — Révision &amp; validation
+
+Deux niveaux d&apos;approbation séquentiels et obligatoires :
+
+
+Niveau 1 : approbation interne (Stratège ou Lead)
+
+
+Niveau 2 : approbation client (via portail magic link)
+
+En cas de rejet client, le contenu retourne en production avec commentaire obligatoire. Chaque état est horodaté et attribué dans l&apos;audit log.
+
+
+Étape 5 — Publication
+
+Le contenu approuvé est schedulé ou publié sur les plateformes connectées : Instagram, Facebook, LinkedIn, TikTok, YouTube, X (Twitter). Chaque publication génère un enregistrement dans editorial.publication avec timestamp et statut.
+
+
+Étape 6 — Reporting de performance
+
+Les métriques sont collectées automatiquement après publication : reach, engagement, CTR, taux de conversion. Elles alimentent le dashboard de performance par contenu et par campagne.
+
+
+4.2 Workflow freelance (mode SaaS)
+
+En mode freelance, le workflow suit un cycle mission-centrique :
+
+Brief → Production → Livraison → Validation → Facturation
+
+
+Le propriétaire de mission est le seul point de contact client
+
+
+Les collaborateurs ont un accès scopé à leurs tâches uniquement
+
+
+Chaque livraison est versionnée et rattachée à un jalons de mission
+
+
+L&apos;état &quot;Invoicing&quot; déclenche la génération du bon de livraison
+
+
+4.3 Workflow de collaboration inter-freelances
+
+Le propriétaire de mission peut inviter d&apos;autres freelances en tant que collaborateurs :
+
+
+Invitation → Acceptation → Affectation par profil → Livraison conjointe → Validation client
+
+
+Chaque collaborateur voit uniquement ses tâches et les assets partagés
+
+
+L&apos;audit log attribue chaque contribution individuellement
+
+
+
+
+
+
+5. Fonctionnalités Détaillées
+
+
+5.1 Gestion de campagne
+
+
+Création d&apos;une campagne avec client associé, objectif, dates de début/fin, statut
+
+
+Clôture formelle de campagne avec archivage des contenus et assets
+
+
+Duplication de campagne pour réutilisation de structures existantes
+
+
+Budget prévisionnel par campagne avec suivi des dépenses réelles
+
+
+Tableaux de bord campagne avec indicateurs d&apos;avancement en temps réel
+
+
+5.2 Calendrier éditorial
+
+
+Vue calendrier visuelle (semaine / mois / trimestre)
+
+
+Entrées par plateforme, date, type de contenu, thème et format
+
+
+Glisser-déposer pour replanification rapide
+
+
+Vue de charge par ressource et alerte de surcharge
+
+
+Indicateurs de risque (contenu en retard, asset manquant, client non-répondant)
+
+
+5.3 Production &amp; gestion des tâches
+
+
+Brief structuré attaché à chaque tâche (texte + assets de référence)
+
+
+Dépendances obligatoires entre tâches — aucune étape ne peut être sautée
+
+
+Upload d&apos;assets avec versioning automatique et historique de révisions
+
+
+Rollback vers une version précédente d&apos;un asset
+
+
+Alertes de deadline J-7, J-3, J-1, J-0 avec escalade manager/lead
+
+
+5.4 Communication client intégrée
+
+Module transversal couvrant l&apos;ensemble des échanges entre l&apos;équipe et le client.
+
+
+Messagerie contextuelle par contenu : fil de discussion attaché à chaque item
+
+
+Historique complet des échanges par campagne, consultable et exportable
+
+
+Portail client mobile-first via magic link sécurisé (sans création de compte)
+
+
+Commentaires structurés sur les previews avec annotations visuelles
+
+
+Notifications client configurables : email, SMS optionnel
+
+
+5.5 Chaîne d&apos;approbation
+
+
+Approbation interne en un clic avec commentaire optionnel
+
+
+Approbation client via portail dédié avec commentaire obligatoire en cas de rejet
+
+
+Historique complet des cycles de révision avec attribution nominative
+
+
+Deadline d&apos;approbation configurable avec relance automatique
+
+
+Escalade automatique en cas de non-réponse client après X jours (configurable)
+
+
+5.6 Gestion des assets
+
+
+Versioning automatique à chaque upload (v1, v2, v3...)
+
+
+Comparaison côte-à-côte de deux versions d&apos;un asset
+
+
+Bibliothèque d&apos;assets searchable par tags, type, campagne, date
+
+
+Système de tags et labels personnalisables par workspace
+
+
+Quota de stockage par tier d&apos;abonnement SaaS
+
+
+5.7 Publication multi-plateformes
+
+
+Connexion native aux APIs : Instagram Graph, Facebook, LinkedIn, TikTok, YouTube, X
+
+
+Scheduling avec prévisualisation du rendu par plateforme
+
+
+Gestion des variantes par plateforme (format, ratio, texte adapté)
+
+
+Retry automatique en cas d&apos;échec de publication avec notification
+
+
+Log de publication avec timestamp et statut par plateforme
+
+
+5.8 Reporting &amp; performance
+
+
+Dashboard de performance : taux de complétion, délai d&apos;approbation, ponctualité
+
+
+Métriques par contenu : impressions, engagement, CTR, conversion
+
+
+Comparaison de performance entre campagnes
+
+
+Export CSV/PDF des rapports par client et par période
+
+
+Score de performance freelance : livraisons à temps, révisions, satisfaction
+
+
+5.9 Onboarding &amp; configuration
+
+
+Wizard de création de workspace guidé en 5 étapes
+
+
+Import de clients depuis res.partner Odoo ou CSV
+
+
+Templates de campagne préconfigurés par type (brand awareness, lancement produit, etc.)
+
+
+Configuration des rôles et des droits d&apos;accès par workspace
+
+
+Checklist d&apos;onboarding avec indicateur de complétion
+
+
+5.10 Recherche &amp; taxonomie
+
+
+Recherche full-text sur titres, briefs, commentaires et tags
+
+
+Filtres avancés persistants : statut, plateforme, équipe, période, client
+
+
+Système de tags global et de labels contextuels par campagne
+
+
+Vues sauvegardées et filtres favoris par utilisateur
+
+
+5.11 Facturation &amp; contractuel (mode freelance)
+
+
+Génération automatique de bon de livraison à l&apos;état &apos;Livraison validée&apos;
+
+
+Suivi budgétaire par mission : budget alloué vs dépenses réelles
+
+
+Statuts de facturation : À facturer / Facturé / Payé
+
+
+Export des éléments de facturation par période pour intégration comptable
+
+
+5.12 Notifications &amp; alertes
+
+
+Canaux : email, in-app, Slack (optionnel par workspace)
+
+
+Déclencheurs : nouvelle affectation, deadline approchante, contenu approuvé, révision requise, escalade
+
+
+Préférences de notification configurables par utilisateur
+
+
+Digest quotidien/hebdomadaire optionnel par rôle
+
+
+5.13 Archivage &amp; conformité
+
+
+Archivage automatique des campagnes clôturées après 30 jours configurables
+
+
+Export complet d&apos;un dossier campagne (contenus + assets + historique) en ZIP
+
+
+Conformité RGPD : droit à l&apos;oubli, export données personnelles, consentement traçable
+
+
+Conservation des logs d&apos;audit pendant 5 ans minimum
+
+
+
+
+
+
+6. User Stories &amp; Critères d&apos;Acceptation
+
+
+6.1 Stratège
+
+
+US-STR-01 — Créer une stratégie de campagne
+
+En tant que Stratège, je veux créer une stratégie de campagne afin que l&apos;équipe comprenne la direction de communication.
+
+
+L&apos;objectif de campagne est défini et sauvegardé
+
+
+Les plateformes cibles sont sélectionnées
+
+
+Les KPIs sont définis et consultables par l&apos;équipe
+
+
+La stratégie est transmise automatiquement au Planificateur après validation
+
+
+US-STR-02 — Valider le calendrier éditorial
+
+En tant que Stratège, je veux valider le calendrier éditorial afin que la production démarre dans les temps.
+
+
+Toutes les entrées du calendrier sont visibles avec leur statut
+
+
+La validation est enregistrée avec horodatage et attribution
+
+
+Le Planificateur reçoit une notification de validation
+
+
+6.2 Planificateur
+
+
+US-PLN-01 — Planifier le contenu
+
+En tant que Planificateur, je veux planifier le contenu afin que les deadlines soient respectées.
+
+
+La date de publication est définie et visible dans le calendrier
+
+
+La plateforme cible est spécifiée
+
+
+Les dépendances entre tâches sont créées et bloquantes
+
+
+La vue de charge ressource ne signale aucune surcharge
+
+
+US-PLN-02 — Gérer la charge des équipes
+
+En tant que Planificateur, je veux visualiser la charge de chaque ressource afin d&apos;éviter les surcharges.
+
+
+La vue de charge est accessible depuis le calendrier
+
+
+Un indicateur visuel signale toute ressource à plus de 80% de capacité
+
+
+La réaffectation de tâches est possible en drag &amp; drop
+
+
+6.3 Designer
+
+
+US-DES-01 — Recevoir un brief de production
+
+En tant que Designer, je veux recevoir des tâches avec des briefs clairs afin de produire les assets correctement.
+
+
+Le brief est attaché à la tâche avec le contexte de campagne
+
+
+La deadline est visible et mise en évidence si &lt; 48h
+
+
+L&apos;upload de fichier est disponible directement depuis la tâche
+
+
+Le versioning s&apos;incrémente automatiquement à chaque upload
+
+
+6.4 Client
+
+
+US-CLT-01 — Approuver ou rejeter du contenu
+
+En tant que Client, je veux approuver ou rejeter du contenu afin que seul le contenu validé soit publié.
+
+
+La prévisualisation du contenu est accessible sans création de compte
+
+
+Le bouton d&apos;approbation est visible et accessible sur mobile
+
+
+Un commentaire est obligatoire en cas de rejet
+
+
+L&apos;approbation est enregistrée avec horodatage dans l&apos;audit log
+
+
+US-CLT-02 — Communiquer avec l&apos;équipe
+
+En tant que Client, je veux pouvoir échanger avec l&apos;équipe sur un contenu spécifique afin d&apos;accélérer les révisions.
+
+
+Un fil de discussion est accessible depuis la prévisualisation du contenu
+
+
+Les messages sont notifiés à l&apos;équipe en temps réel
+
+
+L&apos;historique complet de la conversation est conservé
+
+
+6.5 Freelance (mode SaaS)
+
+
+US-FRL-01 — Gérer ses missions
+
+En tant que Freelance, je veux visualiser l&apos;ensemble de mes missions actives afin de prioriser mon travail.
+
+
+Le dashboard mission affiche toutes les missions avec statut, deadline et client
+
+
+Les tâches sont filtrées automatiquement selon mon profil
+
+
+Les alertes de deadline sont actives dès J-7
+
+
+US-FRL-02 — Collaborer avec d&apos;autres freelances
+
+En tant que Freelance, je veux inviter un collaborateur sur une mission afin de constituer une mini-agence.
+
+
+L&apos;invitation est envoyée par email depuis l&apos;interface de mission
+
+
+Le collaborateur accède uniquement à ses tâches assignées
+
+
+Chaque contribution est tracée individuellement dans l&apos;audit log
+
+
+
+
+
+
+7. Règles de Gestion
+
+
+7.1 Règles du cycle de vie du contenu
+
+
+Un contenu ne peut pas changer d&apos;état sans que l&apos;état précédent soit validé
+
+
+Le passage en &apos;Client Review&apos; est conditionné par l&apos;approbation interne
+
+
+Un rejet client remet le contenu en &apos;Revision Required&apos; avec commentaire obligatoire
+
+
+Un contenu &apos;Published&apos; ne peut pas être supprimé — il est archivable uniquement
+
+
+7.2 Règles de dépendances
+
+
+Aucune étape de production ne peut démarrer si sa dépendance amont n&apos;est pas à l&apos;état &apos;Done&apos;
+
+
+Le blocage de dépendance est visible sur la tâche avec le nom de la tâche bloquante
+
+
+Les dépendances cycliques sont interdites et détectées à la création
+
+
+7.3 Règles d&apos;escalade
+
+
+J-7 : notification de rappel à l&apos;assigné
+
+
+J-3 : notification à l&apos;assigné + copie au Team Lead
+
+
+J-1 : notification à l&apos;assigné + Team Lead + Manager
+
+
+J-0 : alerte rouge dans le dashboard + escalade automatique
+
+
+Non-réponse client après X jours : escalade configurable (défaut : 3 jours)
+
+
+7.4 Règles multi-tenant (SaaS)
+
+
+Chaque workspace est strictement isolé — aucune donnée ne traverse les frontières de tenant
+
+
+Un freelance peut appartenir à plusieurs workspaces simultanément
+
+
+Les permissions suivent le profil freelance déclaré lors de l&apos;onboarding
+
+
+La facturation est calculée par tenant de manière indépendante
+
+
+
+
+
+
+8. Gaps Identifiés &amp; Recommandations
+
+Suite à l&apos;analyse fonctionnelle exhaustive du système, 8 angles non couverts ont été identifiés. Ils sont classés par ordre de criticité pour le go-live.
+Gap identifié
+Priorité
+Recommandation
+Communication client intégrée
+CRITIQUE
+Développer un module de messagerie contextuelle par contenu avec portail client mobile-first et historique d&apos;échanges
+Capacité &amp; charge des équipes
+CRITIQUE
+Ajouter une vue de charge par ressource dans le calendrier, avec alertes de surcharge et réaffectation par drag &amp; drop
+Intégrations APIs sociales
+CRITIQUE
+Implémenter les connecteurs natifs Instagram Graph, LinkedIn, TikTok avec retry automatique et log d&apos;échec
+Onboarding &amp; configuration
+IMPORTANT
+Créer un wizard d&apos;onboarding en 5 étapes avec templates préconfigurés et checklist de complétion
+Recherche &amp; taxonomie
+IMPORTANT
+Implémenter un système de tags et une recherche full-text sur l&apos;ensemble des entités (contenu, assets, briefs)
+Facturation &amp; contractuel
+IMPORTANT
+Modéliser le bon de livraison et le suivi budgétaire pour le mode SaaS freelance (état Invoicing)
+IA &amp; assistance éditoriale
+DIFFÉRABLE
+Planifier en v2 : brief auto-généré depuis la stratégie, scoring qualité visuel, suggestions de reformulation
+Archivage &amp; conformité RGPD
+DIFFÉRABLE
+Définir la politique d&apos;archivage et les procédures RGPD avant le lancement commercial
+
+
+
+
+
+
+9. Critères de Succès
+
+
+9.1 Critères fonctionnels
+
+
+100% des livrables sont tracés avec un responsable et une deadline
+
+
+Zéro transition d&apos;état possible sans validation de l&apos;étape précédente
+
+
+L&apos;approbation client est enregistrée avec horodatage dans 100% des cas
+
+
+Les alertes de deadline sont déclenchées dans les fenêtres J-7/J-3/J-1/J-0
+
+
+9.2 Critères d&apos;adoption
+
+
+Un planificateur peut créer une campagne complète en moins de 15 minutes
+
+
+Un client peut approuver du contenu depuis son mobile sans créer de compte
+
+
+Un freelance est opérationnel sur sa première mission en moins de 10 minutes
+
+
+9.3 Indicateurs de performance
+
+
+Taux de complétion des contenus dans les délais &gt; 90%
+
+
+Délai moyen d&apos;approbation client &lt; 48h
+
+
+Ponctualité de publication &gt; 95%
+
+
+Taux de révisions client &lt; 2 par contenu en moyenne
+
+
+— Fin du Cahier des Charges Fonctionnel —
+
+Maono Editorial Ops v2.0 — Avril 2026
+
+
+

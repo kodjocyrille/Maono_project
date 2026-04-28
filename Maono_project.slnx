@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Maono.Api.Tests/Maono.Api.Tests.csproj" />
+  <Project Path="Maono.Api/Maono.Api.csproj" />
+  <Project Path="Maono.Application/Maono.Application.csproj" />
+  <Project Path="Maono.Domain/Maono.Domain.csproj" />
+  <Project Path="Maono.Infrastructure/Maono.Infrastructure.csproj" />
+</Solution>

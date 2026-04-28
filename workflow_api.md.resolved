@@ -1,0 +1,534 @@
+# 🔄 Maono Platform — Workflow Métier API
+
+## Vue d'ensemble Architecture
+
+```mermaid
+graph LR
+    Client["Frontend / Mobile"] -->|HTTP Request| API["Maono.Api"]
+    API -->|MediatR| Pipeline["CQRS Pipeline"]
+    Pipeline -->|ICommand| Handlers["Handlers"]
+    Pipeline -->|IQuery| Handlers
+    Handlers -->|Repository| DB["PostgreSQL"]
+    Handlers -->|S3 SDK| Minio["MinIO Storage"]
+    
+    subgraph "Pipeline (automatique)"
+        P1["LoggingBehavior"] --> P2["ValidationBehavior"]
+        P2 --> P3["TransactionBehavior (ICommand only)"]
+    end
+```
+
+> [!IMPORTANT]
+> **Aucun contrôleur n'accède directement à la base de données.** Tout passe par MediatR → Pipeline → Handler → Repository.
+
+---
+
+## 1. 🔐 Authentification & Sessions
+
+**Contrôleur :** `AuthController` — **Seul contrôleur partiellement public**
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant API as AuthController
+    participant H as Handler
+    participant DB as PostgreSQL
+
+    U->>API: POST /api/auth/register
+    API->>H: RegisterCommand
+    H->>DB: Create IdentityUser + DomainUser
+    H-->>API: { accessToken, refreshToken }
+    API-->>U: 200 OK
+
+    U->>API: POST /api/auth/login
+    API->>H: LoginCommand (+ device fingerprint)
+    H->>DB: Validate credentials + Create DeviceSession
+    H-->>API: { accessToken, refreshToken, sessionId }
+    API-->>U: 200 OK
+
+    U->>API: POST /api/auth/refresh
+    API->>H: RefreshTokenCommand
+    H->>DB: Rotate tokens
+    H-->>API: { newAccessToken, newRefreshToken }
+
+    U->>API: GET /api/auth/sessions 🔒
+    API->>H: GetActiveSessionsQuery
+    H-->>API: List<SessionDto>
+
+    U->>API: POST /api/auth/sessions/{id}/revoke 🔒
+    API->>H: RevokeSessionCommand
+    H->>DB: Mark session as revoked
+```
+
+| Endpoint | Méthode | Auth | Description |
+|---|---|---|---|
+| `/api/auth/register` | POST | ❌ Public | Inscription utilisateur |
+| `/api/auth/login` | POST | ❌ Public | Connexion + device tracking |
+| `/api/auth/refresh` | POST | ❌ Public | Rafraîchir les tokens JWT |
+| `/api/auth/sessions` | GET | 🔒 Bearer | Lister les sessions actives |
+| `/api/auth/sessions/{id}/revoke` | POST | 🔒 Bearer | Révoquer une session |
+| `/api/auth/sessions/revoke-others` | POST | 🔒 Bearer | Révoquer toutes les autres sessions |
+
+---
+
+## 2. 🏢 Workspaces (Multi-tenant)
+
+**Contrôleur :** `WorkspacesController` — 🔒 `[Authorize]`
+
+Chaque workspace est un **tenant isolé**. Les données (campagnes, contenus, etc.) sont filtrées par `WorkspaceId` automatiquement via un Global Query Filter EF Core.
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/workspaces` | POST | `AdminOnly` | Créer un workspace |
+| `/api/workspaces` | GET | 🔒 Bearer | Lister mes workspaces |
+| `/api/workspaces/{id}` | GET | 🔒 Bearer | Détails + membres |
+| `/api/workspaces/{id}/settings` | PATCH | `AdminOnly` | Modifier paramètres, timezone, logo |
+
+---
+
+## 3. 👥 Memberships (Gestion des membres)
+
+**Contrôleur :** `MembershipsController` — 🔒 `[Authorize]`
+
+```mermaid
+graph TD
+    A["POST /api/workspaces/{id}/members"] -->|Inviter| B["WorkspaceMembership"]
+    B --> C["PATCH /{memberId} → Changer rôle"]
+    B --> D["DELETE /{memberId} → Retirer"]
+    B --> E["GET → Lister membres"]
+    
+    D -.->|❌ Bloqué si dernier ADMIN| F["IsLastAdminAsync check"]
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/workspaces/{id}/members` | GET | 🔒 Bearer | Lister les membres |
+| `/api/workspaces/{id}/members` | POST | `AdminOnly` | Inviter un membre |
+| `/api/workspaces/{id}/members/{memberId}` | PATCH | `AdminOnly` | Changer le rôle |
+| `/api/workspaces/{id}/members/{memberId}` | DELETE | `AdminOnly` | Retirer (protège le dernier admin) |
+
+---
+
+## 4. 👤 Clients (Organisations)
+
+**Contrôleur :** `ClientsController` — 🔒 `[Authorize]`
+
+```mermaid
+graph TD
+    A["POST /api/clients"] -->|Créer| B["ClientOrganization"]
+    B --> C["BrandProfile (1:1)"]
+    B --> D["ClientContacts (1:N)"]
+    B --> E["Campaigns (1:N)"]
+    B --> F["Missions (1:N)"]
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/clients` | POST | `CanManageContent` | Créer un client |
+| `/api/clients` | GET | 🔒 Bearer | Lister (avec `?search=`) |
+| `/api/clients/{id}` | GET | 🔒 Bearer | Détails client + contacts + brand |
+| `/api/clients/{id}` | PUT | `CanManageContent` | Modifier le client |
+| `/api/clients/{id}` | DELETE | `CanManageContent` | Archiver (soft-delete) |
+
+---
+
+## 5. 📢 Campagnes
+
+**Contrôleur :** `CampaignsController` — 🔒 `[Authorize]`
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft : POST /api/campaigns
+    Draft --> Active : PUT status=Active
+    Active --> Paused : PUT status=Paused
+    Paused --> Active : PUT status=Active
+    Active --> Completed : PUT status=Completed
+    Completed --> [*]
+    Draft --> Archived : DELETE
+    Active --> Archived : DELETE
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/campaigns` | POST | `CanManageContent` | Créer une campagne |
+| `/api/campaigns` | GET | 🔒 Bearer | Lister (avec `?clientId=`) |
+| `/api/campaigns/{id}` | GET | 🔒 Bearer | Détails + KPIs + tags |
+| `/api/campaigns/{id}` | PUT | `CanManageContent` | Modifier la campagne |
+| `/api/campaigns/{id}` | DELETE | `CanManageContent` | Archiver (soft-delete) |
+| `/api/campaigns/{id}/kpi-targets` | PATCH | `CanManageContent` | Définir les objectifs KPI |
+
+---
+
+## 6. 📝 Contenus (Content Items)
+
+**Contrôleur :** `ContentsController` — 🔒 `[Authorize]`
+
+C'est le **cœur du workflow** — un contenu traverse plusieurs étapes de production :
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft : POST /api/contents
+    Draft --> InProgress : PATCH status
+    InProgress --> InternalReview : PATCH status
+    InternalReview --> ClientReview : After internal approval
+    ClientReview --> Approved : After client approval
+    ClientReview --> RevisionNeeded : Client requests changes
+    RevisionNeeded --> InProgress : Re-work
+    Approved --> Scheduled : Schedule publication
+    Scheduled --> Published : Publish
+    Draft --> Archived : DELETE
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/contents` | POST | `CanManageContent` | Créer un contenu |
+| `/api/contents` | GET | 🔒 Bearer | Lister (avec `?status=`) |
+| `/api/contents/{id}` | GET | 🔒 Bearer | Détails complets |
+| `/api/contents/deadline` | GET | 🔒 Bearer | Filtrer par deadline |
+| `/api/contents/{id}` | PUT | `CanManageContent` | Modifier le contenu |
+| `/api/contents/{id}/status` | PATCH | `CanManageContent` | Changer le statut |
+| `/api/contents/{id}` | DELETE | `CanManageContent` | Archiver (soft-delete) |
+
+---
+
+## 7. ✅ Tâches de production
+
+**Contrôleur :** `TasksController` — 🔒 `[Authorize]`
+
+Chaque contenu peut avoir des tâches granulaires assignées aux membres :
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/contents/{contentId}/tasks` | GET | 🔒 Bearer | Lister les tâches |
+| `/api/contents/{contentId}/tasks` | POST | `CanManageContent` | Créer une tâche |
+| `/api/tasks/{id}` | PATCH | `CanManageContent` | Modifier une tâche |
+| `/api/tasks/{id}` | DELETE | `CanManageContent` | Supprimer une tâche |
+
+---
+
+## 8. ✅ Approbations (Approval Cycles)
+
+**Contrôleur :** `ApprovalsController` — 🔒 `[Authorize]`
+
+```mermaid
+sequenceDiagram
+    participant CM as Content Manager
+    participant API as ApprovalsController
+    participant Client as Client (via Portal)
+
+    CM->>API: POST /api/approvals/internal
+    Note right of API: SubmitInternalDecision (Approve/Reject)
+    
+    alt Internal Approved
+        Client->>API: POST /api/portal/{token}/decisions
+        Note right of API: Décision client via portail anonyme
+        alt Client Approved
+            API-->>CM: Content → Approved status
+        else Revision Needed
+            API-->>CM: New revision round starts
+        end
+    else Internal Rejected
+        API-->>CM: Content → RevisionNeeded
+    end
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/approvals/internal` | POST | `CanApprove` | Soumettre décision interne |
+| `/api/approvals/client` | POST | 🔒 Bearer | Soumettre décision client |
+| `/api/approvals/contents/{contentId}/cycles` | GET | 🔒 Bearer | Historique des cycles |
+
+---
+
+## 9. 📤 Publications
+
+**Contrôleur :** `PublicationsController` — 🔒 `[Authorize]`
+
+```mermaid
+stateDiagram-v2
+    [*] --> Scheduled : POST /schedule
+    Scheduled --> Published : POST /{id}/publish
+    Scheduled --> Failed : Error
+    Failed --> Scheduled : POST /{id}/retry
+    Published --> [*]
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/publications` | GET | 🔒 Bearer | Lister |
+| `/api/publications/{id}` | GET | 🔒 Bearer | Détails + tentatives |
+| `/api/publications/schedule` | POST | `CanPublish` | Planifier une publication |
+| `/api/publications/{id}/publish` | POST | `CanPublish` | Publier immédiatement |
+| `/api/publications/{id}/retry` | POST | `CanPublish` | Re-tenter une publication échouée |
+
+---
+
+## 10. 📎 Assets (Upload Presigned URL)
+
+**Contrôleur :** `AssetsController` — 🔒 `[Authorize]`
+
+Les fichiers (jusqu'à 2 Go) sont uploadés **directement vers MinIO** via presigned URL. L'API ne touche jamais le fichier, elle vérifie juste l'intégrité (SHA-256 + taille).
+
+```mermaid
+sequenceDiagram
+    participant C as Client App
+    participant API as AssetsController
+    participant MinIO as MinIO Storage
+
+    C->>API: POST /api/assets/upload/initiate
+    Note right of API: fileName, mimeType, declaredSize, sha256
+    API-->>C: { presignedUrl, sessionId, expiresAt }
+
+    C->>MinIO: PUT presignedUrl (fichier brut)
+    Note right of MinIO: Upload direct client→stockage
+
+    C->>API: POST /api/assets/upload/sessions/{id}/confirm
+    Note right of API: actualSize, actualSha256
+    API->>MinIO: HEAD object (vérifier taille)
+    API-->>C: { assetId, storagePath, version }
+    
+    alt Taille ou SHA-256 ne match pas
+        API-->>C: 400 CHECKSUM_MISMATCH / SIZE_MISMATCH
+    end
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/assets/{id}` | GET | 🔒 Bearer | Détails de l'asset |
+| `/api/assets/{id}/versions` | GET | 🔒 Bearer | Historique des versions |
+| `/api/assets/{id}/restore` | POST | `CanManageContent` | Restaurer une version antérieure |
+| `/api/assets/upload/initiate` | POST | `CanManageContent` | **Initier un upload (presigned URL)** |
+| `/api/assets/upload/sessions/{id}` | GET | 🔒 Bearer | Statut de la session d'upload |
+| `/api/assets/upload/sessions/{id}/confirm` | POST | `CanManageContent` | **Confirmer l'upload (SHA-256 + taille)** |
+
+---
+
+## 11. 🌐 Portail Client (Accès anonyme)
+
+**Contrôleurs :** `PortalController` (🔓 AllowAnonymous) + `PortalTokensController` (🔒 Authorize)
+
+Le client externe accède au portail via un **token éphémère** (URL-safe, 72h par défaut) sans créer de compte :
+
+```mermaid
+sequenceDiagram
+    participant M as Manager
+    participant API as PortalTokensController
+    participant C as Client externe
+    participant Portal as PortalController
+
+    M->>API: POST /api/clients/{id}/portal-tokens
+    API-->>M: { token, portalUrl, expiresAt }
+    M->>C: Envoie le lien portail (email/chat)
+
+    C->>Portal: GET /api/portal/{token}
+    Portal-->>C: { contents, assets, status }
+
+    C->>Portal: POST /api/portal/{token}/decisions
+    Note right of Portal: decision: "approved" | "changes_requested"
+    Portal-->>C: { contentItemId, decision, submittedAt }
+```
+
+| Endpoint | Méthode | Auth | Description |
+|---|---|---|---|
+| `/api/portal/{token}` | GET | 🔓 Token URL | Voir les contenus accessibles |
+| `/api/portal/{token}/decisions` | POST | 🔓 Token URL | Soumettre une décision (approuver/réviser) |
+| `/api/clients/{id}/portal-tokens` | POST | `CanManageContent` | Générer un token portail |
+| `/api/clients/{id}/portal-tokens/{tokenId}` | DELETE | `CanManageContent` | Révoquer un token |
+
+---
+
+## 12. 🎯 Missions (Freelancer / Facturation)
+
+**Contrôleur :** `MissionsController` — 🔒 `[Authorize]`
+
+```mermaid
+stateDiagram-v2
+    [*] --> Proposed : POST /api/missions
+    Proposed --> Active : PATCH status
+    Active --> Delivered : PATCH status
+    Delivered --> Invoiced : PATCH status
+    Invoiced --> Paid : PATCH status
+    Paid --> [*]
+    Proposed --> Archived : DELETE
+```
+
+| Endpoint | Méthode | Policy | Description |
+|---|---|---|---|
+| `/api/missions` | POST | `CanManageContent` | Créer une mission |
+| `/api/missions` | GET | 🔒 Bearer | Lister les missions |
+| `/api/missions/{id}` | GET | 🔒 Bearer | Détails + milestones |
+| `/api/missions/{id}` | PUT | `CanManageContent` | Modifier |
+| `/api/missions/{id}/status` | PATCH | `CanManageContent` | Changer le statut |
+| `/api/missions/{id}` | DELETE | `CanManageContent` | Archiver |
+
+---
+
+## 13. 💬 Messagerie & 🔔 Notifications
+
+| Contrôleur | Endpoint | Méthode | Description |
+|---|---|---|---|
+| `MessagesController` | `/api/messages/contents/{contentId}` | GET | Lire les messages |
+| `MessagesController` | `/api/messages/contents/{contentId}` | POST | Envoyer un message |
+| `NotificationsController` | `/api/notifications` | GET | Mes notifications |
+| `NotificationsController` | `/api/notifications/{id}/read` | POST | Marquer comme lue |
+| `NotificationsController` | `/api/notifications/read-all` | POST | Tout marquer lu |
+
+---
+
+## 14. 📊 Performance & 📅 Calendrier
+
+| Contrôleur | Endpoint | Policy | Description |
+|---|---|---|---|
+| `PerformanceController` | `/api/performance/publications/{id}` | `CanViewAnalytics` | Snapshots publication |
+| `PerformanceController` | `/api/performance/campaigns/{id}` | `CanViewAnalytics` | Snapshots campagne |
+| `PerformanceController` | `/api/performance/campaigns/{id}/summary` | `CanViewAnalytics` | Agrégat performance |
+| `CalendarController` | `/api/calendar` | 🔒 Bearer | Lire les entrées |
+| `CalendarController` | `/api/calendar/capacity` | 🔒 Bearer | Capacité ressources |
+| `CalendarController` | `/api/calendar` | `CanManageContent` | Créer entrée |
+| `CalendarController` | `/api/calendar/{id}` | `CanManageContent` | Modifier entrée |
+| `CalendarController` | `/api/calendar/{id}` | `CanManageContent` | Supprimer entrée |
+| `CalendarController` | `/api/calendar/validate` | `CanManageContent` | Valider conflit |
+
+---
+
+## 15. 🛡️ Administration
+
+| Contrôleur | Endpoint | Policy | Description |
+|---|---|---|---|
+| `AdminUsersController` | `GET /api/admin/users` | `AdminOnly` | Lister les utilisateurs |
+| `AdminUsersController` | `PATCH /api/admin/users/{id}` | `AdminOnly` | Modifier rôle/statut |
+| `AdminUsersController` | `DELETE /api/admin/users/{id}` | `AdminOnly` | Désactiver un utilisateur |
+| Health | `GET /health` | ❌ Public | Health check simple |
+| Health | `GET /api/admin/health` | `AdminOnly` | Health check détaillé (JSON par service) |
+
+---
+
+## 🔄 Workflow Complet — Parcours Type
+
+```mermaid
+graph TD
+    A["1. Register / Login"] --> B["2. Créer Workspace"]
+    B --> B2["2b. Inviter des membres"]
+    B --> C["3. Créer Client"]
+    C --> D["4. Créer Campagne + KPI Targets"]
+    D --> E["5. Créer Contenu"]
+    E --> E2["5b. Ajouter Tâches"]
+    E --> E3["5c. Uploader Assets (presigned URL)"]
+    E2 --> G["6. Production (status: InProgress)"]
+    E3 --> G
+    G --> H["7. Approbation Interne"]
+    H -->|Approved| I["8. Générer lien Portail Client"]
+    H -->|Rejected| G
+    I --> I2["9. Client approuve/demande modifs via portail"]
+    I2 -->|Approved| J["10. Planifier Publication"]
+    I2 -->|Changes| G
+    J --> K["11. Publier"]
+    K --> L["12. Suivi Performance"]
+    
+    style A fill:#4CAF50,color:#fff
+    style K fill:#2196F3,color:#fff
+    style L fill:#FF9800,color:#fff
+```
+
+### Résumé du parcours :
+
+1. **S'inscrire / Se connecter** → `POST /api/auth/register` ou `/login`
+2. **Créer un workspace** → `POST /api/workspaces`
+3. **Inviter des membres** → `POST /api/workspaces/{id}/members`
+4. **Ajouter un client** → `POST /api/clients`
+5. **Lancer une campagne + KPIs** → `POST /api/campaigns` + `PATCH /{id}/kpi-targets`
+6. **Créer du contenu** → `POST /api/contents`
+7. **Ajouter des tâches** → `POST /api/contents/{id}/tasks`
+8. **Uploader des assets** → `POST /api/assets/upload/initiate` → PUT MinIO → `/confirm`
+9. **Travailler** → `PATCH /api/contents/{id}/status` (Draft → InProgress)
+10. **Approbation interne** → `POST /api/approvals/internal`
+11. **Générer lien portail** → `POST /api/clients/{id}/portal-tokens`
+12. **Client approuve** → `POST /api/portal/{token}/decisions`
+13. **Planifier** → `POST /api/publications/schedule`
+14. **Publier** → `POST /api/publications/{id}/publish`
+15. **Suivre** → `GET /api/performance/campaigns/{id}/summary`
+
+---
+
+## 🔒 Matrice de Sécurité — Policies par Rôle
+
+### Policies définies dans `Program.cs`
+
+| Policy | Rôles autorisés |
+|---|---|
+| `AdminOnly` | ADMIN |
+| `CanManageContent` | ADMIN, STRATEGIST, CONTENT_PLANNER |
+| `CanPublish` | ADMIN, SOCIAL_MEDIA_MANAGER |
+| `CanApprove` | ADMIN, STRATEGIST, CONTENT_PLANNER |
+| `CanViewAnalytics` | ADMIN, STRATEGIST |
+
+### Application par contrôleur
+
+| Contrôleur | Policy | Actions protégées |
+|---|---|---|
+| `AdminUsersController` | `AdminOnly` | Tout (classe) |
+| `WorkspacesController` | `AdminOnly` | POST, PATCH settings |
+| `MembershipsController` | `AdminOnly` | POST, PATCH, DELETE |
+| `CampaignsController` | `CanManageContent` | POST, PUT, DELETE, PATCH kpi |
+| `ContentsController` | `CanManageContent` | POST, PUT, PATCH status, DELETE |
+| `TasksController` | `CanManageContent` | POST, PATCH, DELETE |
+| `CalendarController` | `CanManageContent` | POST, PATCH, DELETE, validate |
+| `AssetsController` | `CanManageContent` | restore, upload/initiate, upload/confirm |
+| `ClientsController` | `CanManageContent` | POST, PUT, DELETE |
+| `MissionsController` | `CanManageContent` | POST, PUT, PATCH status, DELETE |
+| `PortalTokensController` | `CanManageContent` | POST, DELETE |
+| `PublicationsController` | `CanPublish` | schedule, publish, retry |
+| `ApprovalsController` | `CanApprove` | POST internal |
+| `PerformanceController` | `CanViewAnalytics` | Tout (classe) |
+| `PortalController` | 🔓 AllowAnonymous | Accès par token URL |
+| `MessagesController` | 🔒 Bearer | Tout |
+| `NotificationsController` | 🔒 Bearer | Tout |
+
+---
+
+## 🏗️ Pipeline CQRS (pour chaque requête)
+
+```
+Request → Controller → MediatR.Send()
+  → LoggingBehavior (log entrée/sortie/durée)
+  → ValidationBehavior (FluentValidation)
+  → TransactionBehavior (ICommand uniquement — UnitOfWork + SaveChanges)
+  → Handler (logique métier)
+  → Repository (accès DB)
+```
+
+> [!NOTE]
+> Les **queries** (`IQuery`) ne passent PAS par `TransactionBehavior` — elles sont en lecture seule.
+> Les **commands** (`ICommand`) sont encapsulées dans une transaction automatique.
+
+---
+
+## 📦 Format de Réponse Unifié
+
+**Succès :**
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Opération réussie",
+  "data": { ... }
+}
+```
+
+**Erreur :**
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "message": "Identifiant ou mot de passe incorrect.",
+  "errors": [
+    { "code": "auth_failed", "message": "Identifiant ou mot de passe incorrect." }
+  ]
+}
+```
+
+**Garanties :**
+- `message` → jamais `null`
+- `statusCode` → toujours présent
+- `data` → uniquement en cas de succès
+- `errors` → uniquement en cas d'erreur
+- Tous les messages sont en **français**

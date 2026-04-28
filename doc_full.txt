@@ -1,0 +1,426 @@
+MAONO
+
+Document d’Architecture Logicielle
+
+Cible ASP.NET Core / PostgreSQL / Multi-tenant
+
+Version de travail – Avril 2026
+
+Ce document formalise l’architecture recommandée pour Maono Editorial Ops après abandon d’Odoo comme cœur métier. Il décrit l’architecture logique, la structure de solution .NET, la stratégie multi-tenant, les règles transverses et le modèle d’entités cible.
+
+1. Objectif du document
+L’objectif de ce document est de fournir un cadre d’implémentation détaillé et cohérent pour la version ASP.NET Core de Maono Editorial Ops. Il sert de référence commune pour l’équipe backend, l’équipe frontend, les parties prenantes produit et les futures décisions d’industrialisation.
+La proposition ci-dessous vise un monolithe modulaire, piloté par le domaine métier, avec une exposition HTTP API-first, un stockage PostgreSQL et une stratégie multi-tenant adaptée au produit SaaS visé.
+2. Résumé exécutif
+Architecture cible : monolithe modulaire ASP.NET Core.
+Approche de conception : DDD pragmatique + Application CQRS + MediatR.
+Base de données : PostgreSQL.
+Multi-tenant recommandé : base partagée, schéma partagé, isolation par WorkspaceId.
+Sécurité : ASP.NET Core Identity + JWT Bearer + politiques d’autorisation + Row Level Security ciblée.
+Intégrations externes : Odoo en périphérie pour communication/facturation, jamais au cœur du domaine.
+Traitements différés : BackgroundService / workers internes pour relances, escalades, publication planifiée et synchronisations.
+API : ProblemDetails pour les erreurs, wrapper de succès optionnel dans la couche API uniquement.
+3. Principes d’architecture
+
+4. Vue d’ensemble de l’architecture cible
+La solution adopte une architecture en quatre couches principales : Domain, Application, Infrastructure et API. Le front Next.js consomme l’API HTTP et les workers internes exécutent les traitements différés. Odoo reste un système périphérique appelé via des ports applicatifs.
+
+Schéma logique simplifié :
+Next.js / Portail client
+          |
+        HTTP
+          |
+        API
+          |
+     Application
+          |
+        Domain
+          |
+   Infrastructure
+    |    |     |
+PostgreSQL Odoo Storage/Email
+5. Structure de solution .NET recommandée
+Proposition de solution :
+src/
+  Maono.Domain/
+  Maono.Application/
+  Maono.Infrastructure/
+  Maono.Api/
+tests/
+  Maono.Tests.Unit/
+  Maono.Tests.Integration/
+
+6. Règles de dépendance entre projets
+Domain ne dépend d’aucun autre projet applicatif.
+Application dépend de Domain.
+Infrastructure dépend de Domain et Application.
+API dépend de Application et Infrastructure.
+Aucune dépendance inverse n’est autorisée.
+Les intégrations externes sont appelées uniquement via des interfaces exposées par Application et implémentées dans Infrastructure.
+7. Règles de conception par couche
+7.1 Domain
+Contient les règles métier intrinsèques : transitions autorisées, exigences de validation, comportements d’entité, contraintes inter-objets.
+Expose des DomainEvents indépendants de MediatR.
+Ne contient ni DbContext, ni annotations HTTP, ni logique de sérialisation.
+Les agrégats imposent les invariants et protègent l’état.
+7.2 Application
+Contient les commandes, requêtes et handlers.
+Orchestre les transactions et les appels aux repositories.
+Déclenche les intégrations via interfaces : IOdooBillingService, INotificationService, IAssetStorageService, etc.
+Gère les validations de cas d’usage via FluentValidation.
+7.3 Infrastructure
+Implémente EF Core et la persistance réelle.
+Implémente Identity, JWT, refresh tokens, clients Odoo, email, stockage objet, antivirus éventuel.
+Héberge les workers planifiés et les services d’arrière-plan.
+7.4 API
+Mappe les requêtes HTTP vers les commandes/requêtes applicatives.
+Applique l’authentification, l’autorisation, la gestion centralisée des erreurs et la documentation OpenAPI.
+Peut envelopper les réponses de succès pour uniformiser le contrat frontend, sans propager ce wrapper dans Application.
+8. Flux d’exécution d’une requête
+Le client appelle un endpoint HTTP avec un JWT contenant l’identité et le workspace actif.
+L’API résout le contexte utilisateur et le contexte workspace.
+L’API appelle MediatR avec une commande ou une requête.
+Les behaviors exécutent les validations, la journalisation applicative et la transaction si nécessaire.
+Le handler orchestre le cas d’usage à partir du domaine et des interfaces abstraites.
+Infrastructure exécute la persistance, les appels externes ou le stockage.
+Le résultat est transformé en réponse HTTP cohérente.
+Les événements métiers ou événements d’intégration sont persistés / propagés selon le scénario.
+9. Composants transverses recommandés
+
+10. Stratégie multi-tenant retenue
+La stratégie retenue est une base PostgreSQL partagée, un schéma applicatif partagé et une isolation logique par WorkspaceId. Cette approche est la plus adaptée au stade actuel du produit : elle limite la complexité opérationnelle, facilite l’onboarding et reste compatible avec une promotion future de certains clients vers une base dédiée.
+
+10.1 Principes de modélisation multi-tenant
+Toutes les entités possédées par un tenant portent un WorkspaceId.
+Les utilisateurs sont globaux ; leur appartenance à un workspace passe par WorkspaceMembership.
+Le JWT transporte l’identité et le workspace actif.
+Toute commande ou requête applicative requiert un contexte tenant explicite.
+Les tables globales et les tables tenant-owned sont clairement distinguées.
+10.2 Défense en profondeur
+Filtrage applicatif : le contexte workspace est résolu en entrée.
+Filtrage EF Core : Global Query Filters sur les entités tenant-owned.
+Protection PostgreSQL : politiques Row Level Security ciblées sur les tables sensibles.
+Audit : chaque trace stocke WorkspaceId.
+Stockage fichier : partition logique par workspace dans les clés/buckets.
+11. Authentification et autorisation
+L’authentification repose sur ASP.NET Core Identity pour la gestion des comptes, mots de passe, rôles, claims et refresh tokens. L’API utilise JWT Bearer comme mécanisme d’authentification principal pour le frontend.
+
+11.1 Permissions
+Le système ne doit pas se limiter aux rôles larges. Il doit supporter des permissions fines, par exemple :
+campaign.create
+campaign.update
+calendar.validate
+content.assign
+content.approve.internal
+content.approve.client
+asset.upload
+publication.schedule
+publication.retry
+mission.invite
+billing.export.odoo
+workspace.manage_users
+12. Politique de réponse API et gestion d’erreurs
+L’API peut renvoyer un wrapper de succès unifié pour simplifier l’intégration frontend. Ce wrapper ne doit pas contaminer la couche Application.
+
+13. Intégration avec Odoo
+Odoo n’est plus le cœur du produit. Il devient un système externe utilisé pour certaines capacités support : communication, facturation, export administratif ou synchronisation de données si le besoin est confirmé.
+Application expose des contrats : IOdooBillingService, IOdooContactSyncService, IOdooCommunicationService.
+Infrastructure implémente ces contrats avec HttpClient, mapping, retry, logs et gestion d’erreurs.
+Aucune entité métier du domaine ne dépend d’Odoo.
+Toutes les synchronisations doivent être auditables et rejouables si nécessaire.
+14. Workers et traitements différés
+Escalade de deadlines J-7 / J-3 / J-1 / J-0.
+Relances d’approbation client après X jours.
+Publication planifiée des contenus.
+Retry automatique de publication après échec temporaire.
+Collecte périodique des métriques.
+Synchronisation différée vers Odoo.
+Ces traitements seront implémentés via BackgroundService / services hébergés, avec journalisation et idempotence minimale.
+15. Journalisation et audit
+15.1 Audit métier
+Changement de statut d’un contenu.
+Approbation interne ou client.
+Upload ou restauration d’une version d’asset.
+Invitation ou retrait d’un collaborateur sur une mission.
+Export d’un document de facturation vers Odoo.
+15.2 Logs techniques
+Exceptions, appels externes, performances, retries, erreurs réseau, health checks.
+Les logs techniques et l’audit métier doivent être séparés conceptuellement et techniquement. Ils n’ont pas le même but ni les mêmes cycles de conservation.
+16. Modèle de domaine cible
+Le modèle ci-dessous constitue une cible logique pour l’implémentation EF Core et la structuration des agrégats. Il ne s’agit pas obligatoirement d’un mapping 1:1 entre classes et tables, mais il définit les entités principales à prendre en compte.
+16.1 Abstractions communes
+
+16.2 Module Tenancy & Identity
+
+16.3 Module Clients & Référentiel
+
+16.4 Module Campaigns
+
+16.5 Module Planning & Capacity
+
+16.6 Module Content Production
+
+16.7 Module Assets & Versioning
+
+16.8 Module Approval & Client Portal
+
+16.9 Module Publication
+
+16.10 Module Performance & Reporting
+
+16.11 Module Missions Freelance
+
+16.12 Module Notifications
+
+16.13 Module Audit & Intégration
+
+17. Statuts et enums recommandés
+
+18. Agrégats recommandés
+Workspace : agrégat racine de gouvernance tenant.
+Campaign : racine pour les objectifs, KPI et certaines décisions structurantes.
+ContentItem : agrégat central pour la production, les briefs, les dépendances métier et les cycles d’approbation.
+Asset : agrégat pour le versioning et la restauration.
+Mission : agrégat du mode freelance.
+Publication : agrégat pour l’envoi externe, le retry et le suivi.
+19. Endpoints API recommandés par domaine
+La documentation technique initiale couvrait le cœur, mais plusieurs routes doivent être complétées. La proposition cible est la suivante :
+
+20. Règles d’implémentation EF Core
+Ajouter WorkspaceId sur toute entité tenant-owned.
+Appliquer des Global Query Filters sur les entités tenant-owned.
+Configurer les indexes métiers : WorkspaceId + Status, WorkspaceId + PublicationDate, WorkspaceId + ClientId, etc.
+Prévoir des contraintes d’unicité utiles : WorkspaceId + Slug, WorkspaceId + Tag.Name, WorkspaceId + SocialConnection.Platform + ExternalAccountId.
+Utiliser des configurations Fluent API plutôt que des annotations éparpillées.
+Garder les migrations centralisées dans Infrastructure.
+Séparer les projections/reporting si certaines requêtes deviennent trop complexes.
+21. Index et contraintes recommandés
+
+22. Sécurité des données et fichiers
+Clés de stockage segmentées par workspace.
+URLs signées pour les assets privés.
+Historique des téléchargements sensibles si nécessaire.
+Rotation des secrets d’intégration.
+Antivirus à l’upload pour les documents entrants si le risque le justifie.
+Jamais de confiance implicite dans les données externes renvoyées par les plateformes ou par Odoo.
+23. Décisions d’architecture à figer avant implémentation
+
+24. Feuille de route technique proposée
+1. Créer la solution .NET et les projets Domain / Application / Infrastructure / API.
+2. Mettre en place le module Tenancy & Identity.
+3. Implémenter le modèle de base : Workspace, Membership, Client, Campaign, CalendarEntry, ContentItem.
+4. Ajouter assets, versioning et approbation.
+5. Ajouter publication, retry et métriques.
+6. Ajouter mode freelance : Mission, Milestones, Deliveries, Billing.
+7. Brancher Odoo en périphérie sur les cas d’usage retenus.
+8. Durcir la sécurité multi-tenant : query filters + RLS ciblée.
+9. Ajouter workers, audit avancé et tests d’intégration.
+25. Conclusion
+L’architecture proposée répond au besoin réel de Maono : un produit SaaS orienté workflow, piloté par des règles métier fortes, avec une isolation multi-tenant cohérente, une API moderne et une capacité d’évolution maîtrisée. Le choix d’ASP.NET Core comme cœur est pertinent à condition de garder un domaine riche, une application orchestratrice et une infrastructure strictement périphérique.
+Le modèle d’entités présenté dans ce document constitue une base suffisamment détaillée pour démarrer la conception EF Core, structurer le backlog backend et aligner les futures API.
+
+--- TABLE ---
+Principe | Interprétation
+Mettre le métier au centre | Le modèle du domaine doit exprimer les règles réelles du workflow éditorial : statuts, dépendances, approbations, livraisons, publications et audits.
+Garder des couches nettes | Domain ne dépend d’aucun détail technique ; Application orchestre les cas d’usage ; Infrastructure implémente les détails ; API expose HTTP.
+Privilégier le pragmatisme | Le projet vise une v1 robuste et livrable ; l’architecture doit éviter la complexité inutile tout en préparant l’évolution.
+Concevoir pour le multi-tenant dès le départ | Le modèle, les requêtes, l’authentification, les logs et le stockage doivent tous prendre en compte le Workspace courant.
+Favoriser l’évolutivité interne | La structure doit permettre l’ajout futur de modules, d’intégrations, d’IA, de billing avancé ou de promotion d’un tenant vers une base dédiée.
+Traçabilité totale | Chaque action métier importante doit être auditée et réconciliable : qui, quand, sur quel workspace, sur quelle entité, avant/après.
+
+--- TABLE ---
+Couche | Responsabilité principale | Ce qu’elle contient | Ce qu’elle ne contient pas
+Domain | Métier pur | Entités, agrégats, value objects, règles métier, enums, domain events, interfaces pures | EF Core, HTTP, JWT, email, Odoo, cache, contrôleurs
+Application | Cas d’usage et orchestration | CQRS, MediatR, validators, handlers, DTOs, interfaces de repositories/services, politiques métier | Détails SQL, SDK externes, controllers
+Infrastructure | Implémentation technique | DbContext, EF Core, Identity, JWT, Odoo clients, stockage, email, audit persistence, background jobs | Règles métier profondes
+API | Exposition HTTP | Controllers/endpoints, middleware, exception handling, OpenAPI, mapping HTTP | Logique métier réelle
+
+--- TABLE ---
+Projet | Contenu recommandé
+Maono.Domain | Entités métier, agrégats, value objects, enums, exceptions métier, domain events, interfaces pures, constantes métier.
+Maono.Application | Features CQRS, validators, handlers, DTOs, interfaces de persistance et d’intégration, behaviors MediatR, policies métier, services de domaine applicatifs.
+Maono.Infrastructure | EF Core, DbContext, configurations, repositories, Identity, JWT, providers externes, Odoo, email, fichiers, cache optionnel, workers, implémentations d’audit.
+Maono.Api | Program.cs, controllers/endpoints, middlewares, auth configuration, OpenAPI/Swagger, filters, wrappers HTTP, ProblemDetails.
+Maono.Tests.Unit | Tests de domaine, tests de validators, tests de handlers avec doubles.
+Maono.Tests.Integration | Tests API, tests EF Core/PostgreSQL, tests de sécurité multi-tenant, tests de scénarios métier de bout en bout.
+
+--- TABLE ---
+Composant | Rôle | Emplacement recommandé
+ValidationBehavior | Exécuter FluentValidation avant le handler | Application
+TransactionBehavior | Ouvrir/committer/rollback une transaction sur les commandes | Application + Infrastructure
+LoggingBehavior | Tracer les commandes/requêtes et la durée | Application
+CurrentUserService | Exposer UserId, WorkspaceId actif, rôles/permissions | Application (interface) / API-Infrastructure (impl.)
+DateTimeProvider | Horodatage testable | Application (interface) / Infrastructure (impl.)
+ProblemDetails middleware | Uniformiser les erreurs HTTP | API
+Audit writer | Persist er les traces métier importantes | Application (contrat) / Infrastructure (impl.)
+Outbox léger | Fiabiliser les événements d’intégration critiques | Infrastructure, option recommandé pour la publication et Odoo
+
+--- TABLE ---
+Option | Avantages | Inconvénients | Verdict pour Maono
+Base partagée / schéma partagé | Simple, rapide, coût faible, migrations uniques, bon support multi-workspace | Exige une discipline stricte d’isolation | Recommandé
+Base partagée / schéma par tenant | Séparation logique plus visible | Migrations et exploitation plus complexes, peu d’intérêt avec des utilisateurs multi-workspace | Non retenu
+Base par tenant | Isolation maximale | Provisioning, supervision et coûts plus lourds | À réserver à un futur mode enterprise
+
+--- TABLE ---
+Besoin | Choix recommandé
+Gestion des comptes internes | ASP.NET Core Identity
+Authentification API | JWT Bearer access token + refresh token
+Portail client | Magic link à usage unique, séparé des comptes internes
+Autorisation | Policy-based authorization + permissions métier
+Multi-workspace | Workspace actif porté par le contexte et éventuellement le JWT
+
+--- TABLE ---
+Type de réponse | Recommandation
+Succès | Wrapper léger de type success / message / data / meta si besoin.
+Erreur fonctionnelle | ProblemDetails ou ApiErrorResponse spécialisé.
+Validation | Détails de champs invalides, code métier clair.
+Statut HTTP | Le code HTTP reste la source de vérité ; éviter de le dupliquer en contradiction dans le body.
+
+--- TABLE ---
+Abstraction | Rôle | Propriétés minimales recommandées
+BaseEntity | Base commune | Id, CreatedAtUtc, CreatedBy, UpdatedAtUtc, UpdatedBy
+TenantEntity | Base pour les entités appartenant à un workspace | Hérite de BaseEntity + WorkspaceId
+AggregateRoot | Marqueur d’agrégat | Sans propriétés spécifiques
+DomainEvent | Événement métier | EventId, OccurredOnUtc
+SoftDeletableEntity | Suppression logique si nécessaire | IsDeleted, DeletedAtUtc, DeletedBy
+
+--- TABLE ---
+Entité | Type | Description / champs clés | Relations majeures
+User | Global | Compte applicatif : IdentityId, Email, DisplayName, Status, LastLoginAtUtc | Membre de plusieurs workspaces
+Workspace | Global | Tenant logique : Name, Slug, Plan, Status, DefaultTimezone, SettingsJson | Possède campagnes, contenus, missions…
+WorkspaceMembership | Global vers tenant | Lien User-Workspace : RoleId, Status, JoinedAtUtc, IsDefault | User 1..* / Workspace 1..*
+Role | Global ou scoped | Nom métier : Admin, Strategist, Planner, Designer, ClientProxy, FreelancerOwner… | Associe des permissions
+Permission | Global | Code métier : campaign.create, publication.schedule… | Role N..N Permission
+RefreshToken | Global | Token de session longue durée : UserId, ExpiresAtUtc, RevokedAtUtc, DeviceInfo | Appartient à un User
+ClientAccessToken | Tenant | Magic link / accès portail : ContentId ou ApprovalCycleId, ExpiresAtUtc, UsedAtUtc | Usage ponctuel
+
+--- TABLE ---
+Entité | Description | Relations
+ClientOrganization | Client d’un workspace : Name, LegalName, BillingEmail, Phone, Notes, ExternalOdooId | Workspace 1..* ClientOrganization
+ClientContact | Contact rattaché au client : FullName, Email, Phone, Position, IsPrimaryApprover | ClientOrganization 1..* ClientContact
+BrandProfile | Charte ou contexte marque : BrandTone, Palette, Constraints, SocialHandles | Optionnel, lié à un client
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+Campaign | Name, ClientOrganizationId, Objective, StartDate, EndDate, Status, BudgetPlanned, BudgetSpent | Agrégat racine ; possède KPI, calendrier et contenus
+CampaignKpi | Name, TargetValue, Unit, Periodicity | Campagne 1..* KPI
+CampaignTag | Association de tags à la campagne | N..N avec Tag
+CampaignClosureRecord | Trace de clôture : ClosedAtUtc, ClosedBy, Summary | 1..0/1
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+CalendarEntry | CampaignId, PublicationDate, Platform, ContentType, Theme, Status | Une entrée de calendrier peut regrouper plusieurs contenus
+ResourceCapacity | UserId, WeekStart, CapacityHours, AssignedHours, OverloadThreshold | Vue de charge par ressource
+Assignment | Affectation de travail : ContentId, UserId, RoleOnTask, AssignedAtUtc | Historisable
+SavedView | Filtres favoris d’un utilisateur sur le calendrier | Optionnel mais utile pour l’UX
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+ContentItem | CalendarEntryId, Title, Format, Status, Deadline, Priority, CurrentRevisionNumber | Agrégat central de production
+ContentDependency | Bloque un contenu par un autre : SourceContentId, BlockingContentId, DependencyType | Interdit les cycles
+Brief | ContentItemId, Body, CreatedBy, CreatedAtUtc | Un contenu peut avoir plusieurs versions de brief
+TaskChecklistItem | Sous-étape optionnelle : Label, IsCompleted, CompletedBy | Support de pilotage fin
+Tag | Taxonomie par workspace : Name, Color, Category | Réutilisé par campagnes, contenus et assets
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+Asset | ContentItemId, AssetType, CurrentVersionNumber, CurrentStoragePath, MimeType, Visibility | Un asset logique peut avoir plusieurs versions
+AssetVersion | AssetId, VersionNumber, StoragePath, FileSize, Checksum, UploadedBy, UploadedAtUtc | Historique complet
+AssetPreview | AssetVersionId, PreviewPath, Width, Height, Duration | Prévisualisation générée
+AssetComparisonRecord | Trace des comparaisons ou restaurations | Optionnel
+AssetRestoreRecord | Restauration d’une version précédente : RestoredFromVersion, RestoredBy | Audit explicite recommandé
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+ApprovalCycle | ContentItemId, RevisionRound, InternalStatus, ClientStatus, StartedAtUtc, CompletedAtUtc | Un contenu peut passer par plusieurs cycles
+ApprovalDecision | ApprovalCycleId, ActorType, ActorId ou ExternalIdentity, Decision, Comment, DecidedAtUtc | Historise chaque décision
+ClientPortalSession | Token ou lien éphémère : ContactId, ApprovalCycleId, ExpiresAtUtc, UsedAtUtc | Usage unique recommandé
+ContentMessage | Fil de discussion contextuel : ContentItemId, AuthorType, AuthorId, Body, SentAtUtc | Messagerie unifiée
+ContentAnnotation | Commentaire structuré sur preview : AssetVersionId, Coordinates/Anchor, Body | Optionnel pour v1, préparé pour v2
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+Publication | ContentItemId, Platform, ScheduledAtUtc, PublishedAtUtc, Status, ExternalPostId | Entité indispensable absente du modèle initial
+PublicationVariant | PublicationId, Caption, HashTags, PlatformSpecificPayload, Ratio | Préparer les variantes par plateforme
+PublicationAttempt | PublicationId, AttemptNumber, StartedAtUtc, CompletedAtUtc, Result, ErrorMessage | Support du retry
+SocialConnection | WorkspaceId, Platform, ExternalAccountId, AccessTokenRef, RefreshTokenRef, Status | Connexion API plateforme
+PublicationLog | Journal métier de publication | Peut être fusionné avec audit si besoin
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+PerformanceSnapshot | PublicationId ou ContentItemId, CollectedAtUtc, Impressions, Reach, Engagement, Clicks, ConversionRate | Historique de métriques
+CampaignPerformanceAggregate | Vue matérialisée ou projection | Pour dashboards
+ReportExport | Trace des exports CSV/PDF par client et période | Audit et re-génération
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+Mission | WorkspaceId, OwnerUserId, ClientOrganizationId, Name, Status, Budget, InvoiceStatus, StartDate, EndDate | Agrégat racine du mode freelance
+MissionMember | MissionId, UserId, RoleOnMission, JoinedAtUtc | Visibilité limitée aux tâches pertinentes
+MissionMilestone | MissionId, Name, DueDate, Status, Amount | Jalons de livraison
+MissionDelivery | MissionMilestoneId, DeliveredAtUtc, DeliveredBy, Notes | Support du bon de livraison
+MissionTask | MissionId, AssignedToUserId, Title, Deadline, Status | Pilotage opérationnel détaillé
+DeliveryNote | MissionDeliveryId, Reference, GeneratedAtUtc, StoragePath | Pièce contractuelle
+BillingRecord | MissionId, Amount, Currency, BillingStatus, ExportedToOdooAtUtc | Chaîne de facturation
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+Notification | WorkspaceId, UserId, Channel, Type, Subject, Body, Status, SentAtUtc | Canal email / in-app / Slack plus tard
+NotificationPreference | UserId, Channel, Enabled, DigestMode | Préférences utilisateur
+EscalationRule | WorkspaceId, TriggerType, Delay, RecipientsRule | Règles de relance configurables
+
+--- TABLE ---
+Entité | Description / champs clés | Relations / règles
+AuditLog | WorkspaceId, Action, EntityName, EntityId, ActorType, ActorId, OldValueJson, NewValueJson, OccurredAtUtc | Traçabilité métier
+IntegrationEvent | Name, AggregateId, PayloadJson, Status, CreatedAtUtc, PublishedAtUtc | Outbox léger
+IntegrationFailure | Provider, CorrelationId, ErrorCode, Details, FailedAtUtc | Diagnostic et reprise
+WebhookSubscription | WorkspaceId, Endpoint, Secret, EventFilter, IsEnabled | Sortie événementielle optionnelle
+
+--- TABLE ---
+Enum | Valeurs recommandées | Remarque
+CampaignStatus | Draft, Active, Paused, Closed, Archived | Reste cohérent avec les besoins
+ContentStatus | Draft, InProduction, InReview, Approved, Scheduled, Published, PublishFailed, Archived | Ajout explicite de PublishFailed
+ApprovalStatus | Pending, Approved, Rejected | Peut être utilisé pour interne et client
+MissionStatus | Brief, Production, Delivery, Validation, Invoicing, Closed | Aligné avec le mode freelance
+BillingStatus | Draft, ToInvoice, Invoiced, Paid, Failed | Synchronisation Odoo incluse
+NotificationChannel | InApp, Email, Sms, Slack | SMS/Slack optionnels
+Platform | Instagram, Facebook, LinkedIn, TikTok, YouTube, X | Plateformes couvertes
+
+--- TABLE ---
+Domaine | Exemples d’endpoints à exposer
+Workspaces | GET /workspaces, POST /workspaces, GET /workspaces/{id}, PATCH /workspaces/{id}/settings
+Memberships | GET /workspaces/{id}/members, POST /workspaces/{id}/members, PATCH /memberships/{id}
+Campaigns | GET /campaigns, POST /campaigns, GET /campaigns/{id}, PATCH /campaigns/{id}, POST /campaigns/{id}/close
+Calendar | GET /calendar, POST /calendar, PATCH /calendar/{id}, POST /calendar/{id}/validate
+Contents | GET /contents, POST /contents, GET /contents/{id}, PATCH /contents/{id}, PATCH /contents/{id}/status
+Assets | POST /assets, GET /assets/{id}, GET /assets/{id}/versions, POST /assets/{id}/restore
+Approvals | POST /approvals/internal, POST /approvals/client, GET /contents/{id}/approval-cycles
+Messages | GET /contents/{id}/messages, POST /contents/{id}/messages
+Publications | POST /contents/{id}/schedule, POST /publications/{id}/publish, POST /publications/{id}/retry, GET /publications/{id}
+Performance | GET /performance, GET /campaigns/{id}/performance
+Missions | GET /missions, POST /missions, GET /missions/{id}, POST /missions/{id}/invite, POST /missions/{id}/deliveries
+Billing/Odoo | POST /missions/{id}/invoice, POST /billing/{id}/export-odoo, GET /billing/{id}/status
+
+--- TABLE ---
+Table / entité | Index ou contrainte
+Workspace | UNIQUE(Slug)
+WorkspaceMembership | UNIQUE(UserId, WorkspaceId)
+Campaign | INDEX(WorkspaceId, Status), INDEX(WorkspaceId, ClientOrganizationId)
+CalendarEntry | INDEX(WorkspaceId, PublicationDate), INDEX(WorkspaceId, Platform)
+ContentItem | INDEX(WorkspaceId, Status), INDEX(WorkspaceId, Deadline), INDEX(WorkspaceId, CalendarEntryId)
+AssetVersion | UNIQUE(AssetId, VersionNumber)
+ApprovalCycle | INDEX(ContentItemId, RevisionRound)
+Publication | INDEX(WorkspaceId, Status), INDEX(WorkspaceId, ScheduledAtUtc)
+PerformanceSnapshot | INDEX(ContentItemId, CollectedAtUtc), INDEX(PublicationId, CollectedAtUtc)
+Mission | INDEX(WorkspaceId, Status), INDEX(WorkspaceId, OwnerUserId)
+
+--- TABLE ---
+Décision | Statut recommandé
+Monolithe modulaire ASP.NET Core | À valider comme choix de base
+PostgreSQL partagé par WorkspaceId | À valider
+Identity + JWT | À valider
+Wrapper de succès limité à l’API | À valider
+ProblemDetails pour les erreurs | À valider
+Publication comme entité métier explicite | À ajouter
+Messagerie contextuelle unifiée ContentMessage | À trancher et préférer à plusieurs modèles concurrents
+Mission + Milestones + Deliveries + BillingRecord | À ajouter dans le mode freelance
+RLS PostgreSQL sur tables sensibles | À planifier
