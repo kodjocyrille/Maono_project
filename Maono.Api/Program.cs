@@ -1,6 +1,7 @@
 using Maono.Application;
 using Maono.Infrastructure;
 using Maono.Api.Middleware;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -78,6 +79,12 @@ using (var scope = app.Services.CreateScope())
     await db.Database.MigrateAsync();
 }
 await Maono.Infrastructure.Seeding.DatabaseSeeder.SeedAsync(app.Services);
+
+// Forward headers from Render's reverse proxy (fixes HTTPS detection + Swagger URLs)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 
 // Middleware pipeline
 app.UseMiddleware<ExceptionHandlingMiddleware>();
