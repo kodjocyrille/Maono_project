@@ -57,12 +57,12 @@ builder.Services.AddOpenApi(options =>
     options.AddDocumentTransformer<Maono.Api.OpenApi.BearerSecuritySchemeTransformer>();
 });
 
-// CORS
+// CORS — allow all origins (dev/staging phase)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? new[] { "http://localhost:3000" })
+        policy.SetIsOriginAllowed(_ => true)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
