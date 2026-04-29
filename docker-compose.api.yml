@@ -1,0 +1,21 @@
+services:
+  maono-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maono-api
+    ports:
+      - "10000:10000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:10000
+      # --- Override via .env or Render dashboard ---
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING:-Host=ep-solitary-frost-alxbu6ja-pooler.c-3.eu-central-1.aws.neon.tech;Database=neondb;Username=neondb_owner;Password=npg_9bOocj8wMAPD;SSL Mode=VerifyFull;Channel Binding=Require}
+      - Jwt__Secret=${JWT_SECRET:-MaonoSuperSecretKey2026!AtLeast32CharactersLong!}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:10000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
