@@ -198,7 +198,14 @@ public static class DatabaseSeeder
                               .Include(u => u.Memberships)
                               .AnyAsync(u => u.Email == adminEmail && u.Memberships.Any());
 
-        if (permCount >= SystemPermissions.Length && roleCount >= SystemRoles.Length && adminExists)
+        // Also verify the Admin role has ALL expected permissions (guards against partial seeds)
+        var adminPermCount = await context.DomainRoles
+            .Where(r => r.Name == "Admin")
+            .SelectMany(r => r.Permissions)
+            .CountAsync();
+        var expectedAdminPerms = SystemRoles.First(r => r.Name == "Admin").Permissions.Length;
+
+        if (permCount >= SystemPermissions.Length && roleCount >= SystemRoles.Length && adminExists && adminPermCount >= expectedAdminPerms)
         {
             logger.LogDebug("Database already seeded — skipping");
             return;
@@ -232,21 +239,43 @@ public static class DatabaseSeeder
     private static async Task SeedRolesAsync(MaonoDbContext context, ILogger logger)
     {
         var allPermissions = await context.Permissions.ToListAsync();
-        var existingRoles = await context.DomainRoles.Select(r => r.Name).ToListAsync();
+        var existingRoles = await context.DomainRoles
+            .Include(r => r.Permissions)
+            .ToListAsync();
 
         foreach (var (name, description, permissionCodes) in SystemRoles)
         {
-            if (existingRoles.Contains(name)) continue;
+            var existingRole = existingRoles.FirstOrDefault(r => r.Name == name);
 
-            var role = new Role
+            if (existingRole == null)
             {
-                Name = name,
-                Description = description,
-                IsSystem = true,
-                Permissions = allPermissions.Where(p => permissionCodes.Contains(p.Code)).ToList()
-            };
-            context.DomainRoles.Add(role);
-            logger.LogInformation("Seeded role: {RoleName}", name);
+                // Brand new role — create with all permissions
+                var role = new Role
+                {
+                    Name = name,
+                    Description = description,
+                    IsSystem = true,
+                    Permissions = allPermissions.Where(p => permissionCodes.Contains(p.Code)).ToList()
+                };
+                context.DomainRoles.Add(role);
+                logger.LogInformation("Seeded role: {RoleName}", name);
+            }
+            else
+            {
+                // Existing system role — sync missing permissions
+                var currentCodes = existingRole.Permissions.Select(p => p.Code).ToHashSet();
+                var expectedPerms = allPermissions.Where(p => permissionCodes.Contains(p.Code)).ToList();
+                var missingPerms = expectedPerms.Where(p => !currentCodes.Contains(p.Code)).ToList();
+
+                if (missingPerms.Any())
+                {
+                    foreach (var perm in missingPerms)
+                        existingRole.Permissions.Add(perm);
+
+                    logger.LogInformation("Repaired role {RoleName}: added {Count} missing permissions ({Codes})",
+                        name, missingPerms.Count, string.Join(", ", missingPerms.Select(p => p.Code)));
+                }
+            }
         }
 
         await context.SaveChangesAsync();

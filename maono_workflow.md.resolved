@@ -1,0 +1,669 @@
+# 🗺️ Maono — Workflow métier complet
+
+> **Base URL :** `http://localhost:5253`
+> **Auth :** Bearer token JWT dans le header `Authorization: Bearer <token>`
+
+---
+
+## 📋 Table des matières
+
+1. [Phase 0 — Authentification](#phase-0--authentification)
+2. [Phase 1 — Onboarding & Workspace](#phase-1--onboarding--workspace)
+3. [Phase 2 — Stratégie (Clients & Campagnes)](#phase-2--stratégie)
+4. [Phase 3 — Planification (Calendrier)](#phase-3--planification)
+5. [Phase 4 — Production (Contenu & Assets)](#phase-4--production)
+6. [Phase 5 — Validation (Approbation)](#phase-5--validation)
+7. [Phase 6 — Publication](#phase-6--publication)
+8. [Phase 7 — Portail Client](#phase-7--portail-client)
+9. [Phase 8 — Missions (Freelance)](#phase-8--missions)
+10. [Workflow Rôles & Permissions](#-workflow-rôles--permissions)
+
+---
+
+## Phase 0 — Authentification
+
+### 0.1 Inscription (Freelancer / Agence)
+Crée un utilisateur + workspace + rôle `FreelancerOwner`.
+
+```http
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "email": "alice@agence.com",
+  "password": "MotDePasse!123",
+  "firstName": "Alice",
+  "lastName": "Dupont",
+  "phoneNumber": "+33612345678",
+  "workspaceName": "Agence Alice"
+}
+```
+**Réponse 201 :** `{ userId, email, displayName, workspaceId, workspaceName, roleName }`
+
+---
+
+### 0.2 Connexion
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "email": "alice@agence.com",
+  "password": "MotDePasse!123",
+  "deviceName": "Chrome - Windows",
+  "deviceType": 1
+}
+```
+**DeviceType :** `0=Unknown | 1=Web | 2=Mobile | 3=Desktop`
+
+**Réponse 200 :** `{ accessToken, refreshToken, expiresIn }`
+
+> ⚠️ **Copie le `accessToken`** — il sera utilisé dans tous les appels suivants.
+
+---
+
+### 0.3 Rafraîchir le token
+```http
+POST /api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "<refresh_token>"
+}
+```
+
+---
+
+### 0.4 Admin — Créer un utilisateur directement
+```http
+POST /api/auth/admin/users
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "email": "bob@agence.com",
+  "firstName": "Bob",
+  "lastName": "Martin",
+  "phoneNumber": null,
+  "password": "TempPass!123",
+  "workspaceId": "<workspace_id>",
+  "roleName": "ContentManager"
+}
+```
+
+---
+
+## Phase 1 — Onboarding & Workspace
+
+### 1.1 Inviter un membre dans le workspace
+```http
+POST /api/workspaces/{workspaceId}/members
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "email": "collaborateur@agence.com",
+  "roleName": "Designer"
+}
+```
+**Réponse 201 :** Un lien d'invitation est généré et envoyé par email.
+
+---
+
+### 1.2 Inscription via invitation (par le collaborateur)
+```http
+POST /api/auth/register/invite
+Content-Type: application/json
+
+{
+  "inviteToken": "<token_reçu_par_email>",
+  "password": "MonMotDePasse!123",
+  "firstName": "Clara",
+  "lastName": "Renard",
+  "phoneNumber": null
+}
+```
+
+---
+
+### 1.3 Lister les membres du workspace
+```http
+GET /api/workspaces/{workspaceId}/members
+Authorization: Bearer <token>
+```
+
+---
+
+### 1.4 Changer le rôle d'un membre
+```http
+PATCH /api/workspaces/{workspaceId}/members/{membershipId}
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "roleName": "ContentManager"
+}
+```
+
+---
+
+## Phase 2 — Stratégie
+
+### 2.1 Créer un client
+```http
+POST /api/clients
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Nike France",
+  "legalName": "Nike SAS",
+  "billingEmail": "compta@nike.fr",
+  "phone": "+33140000000",
+  "notes": "Client premium — réactivité requise"
+}
+```
+**Réponse 201 :** `{ id, name, ... }` → Sauvegarde le `clientId`.
+
+---
+
+### 2.2 Créer une campagne liée au client
+```http
+POST /api/campaigns
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Campagne été 2026",
+  "description": "Lancement de la nouvelle collection",
+  "objective": "Augmenter la notoriété de 30%",
+  "clientOrganizationId": "<clientId>",
+  "startDate": "2026-06-01T00:00:00Z",
+  "endDate": "2026-08-31T00:00:00Z",
+  "budgetPlanned": 15000,
+  "targetReach": 500000,
+  "targetEngagementRate": 4.5,
+  "targetCtr": 2.5,
+  "targetConversions": 1200,
+  "targetPlatforms": ["Instagram", "LinkedIn"]
+}
+```
+**Réponse 201 :** `{ id, name, status: "Draft", ... }` → Sauvegarde le `campaignId`.
+
+> Tous les champs `target*` sont optionnels. Tu peux les compléter ou modifier plus tard via `PATCH /api/campaigns/{id}/kpi-targets`.
+
+---
+
+### 2.3 Modifier les objectifs KPI d'une campagne existante
+```http
+PATCH /api/campaigns/{campaignId}/kpi-targets
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "campaignId": "<campaignId>",
+  "targetReach": 800000,
+  "targetEngagementRate": 5.0
+}
+```
+> Seuls les champs envoyés sont mis à jour — les autres restent inchangés.
+
+```
+
+---
+
+## Phase 3 — Planification
+
+> La planification crée les **entrées calendrier** qui définissent QUOI publier, OÙ et QUAND — avant même de créer le contenu.
+
+### 3.1 Vérifier la capacité de l'équipe pour la semaine
+```http
+GET /api/calendar/capacity?weekStart=2026-06-01T00:00:00Z
+Authorization: Bearer <token>
+```
+**Réponse :** Liste des membres avec leur charge de travail pour la semaine.
+
+---
+
+### 3.2 Créer une entrée calendrier (slot de publication)
+```http
+POST /api/calendar
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "campaignId": "<campaignId>",
+  "publicationDate": "2026-06-15T10:00:00Z",
+  "platform": "Instagram",
+  "contentType": "Carousel",
+  "theme": "Lancement été — visuel plage"
+}
+```
+**Plateformes disponibles :** `Instagram | LinkedIn | TikTok | Twitter | Facebook | YouTube`
+
+**Réponse 201 :** `{ id: "<entryId>", status: "Draft", ... }`
+
+---
+
+### 3.3 Valider l'entrée calendrier
+Une fois le slot vérifié, on le valide pour déclencher la production.
+
+```http
+POST /api/calendar/{entryId}/validate
+Authorization: Bearer <token>
+```
+**Réponse 200 :** `{ status: "Validated", ... }`
+
+---
+
+### 3.4 Consulter le calendrier d'une campagne
+```http
+GET /api/calendar?campaignId={campaignId}
+Authorization: Bearer <token>
+```
+
+---
+
+## Phase 4 — Production
+
+### 4.1 Créer un contenu
+Le contenu est lié à l'entrée calendrier validée.
+
+```http
+POST /api/contents
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "title": "Post Instagram — Lancement été",
+  "format": "Carousel",
+  "calendarEntryId": "<entryId>",
+  "priority": 1,
+  "deadline": "2026-06-12T00:00:00Z"
+}
+```
+**Priority :** `0=Low | 1=Medium | 2=High`
+
+**Réponse 201 :** `{ id: "<contentId>", status: "Draft", ... }`
+
+---
+
+### 4.2 Assigner des tâches au contenu
+```http
+POST /api/contents/{contentId}/tasks
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "title": "Rédiger le texte du carrousel",
+  "description": "3 slides max, ton dynamique",
+  "assignedToUserId": "<userId>",
+  "priority": 2,
+  "dueDate": "2026-06-10T00:00:00Z"
+}
+```
+
+---
+
+### 4.3 Uploader un asset (3 étapes)
+
+**Étape 1 — Initier la session d'upload**
+```http
+POST /api/assets/upload/initiate
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "contentItemId": "<contentId>",
+  "fileName": "visuel-ete.png",
+  "contentType": "image/png",
+  "fileSize": 2048000
+}
+```
+**Réponse :** `{ sessionId, uploadUrl }` → Sauvegarde le `sessionId`.
+
+**Étape 2 — Upload du fichier** (direct vers MinIO via la `uploadUrl`)
+```http
+PUT <uploadUrl>
+Content-Type: image/png
+
+[binary file data]
+```
+
+**Étape 3 — Confirmer l'upload**
+```http
+POST /api/assets/upload/confirm
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "sessionId": "<sessionId>"
+}
+```
+**Réponse 201 :** `{ assetId, fileName, url, ... }`
+
+---
+
+### 4.4 Changer le statut du contenu
+```http
+PATCH /api/contents/{contentId}/status
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "status": 2
+}
+```
+
+**Statuts ContentStatus :**
+| Valeur | Nom | Description |
+|--------|-----|-------------|
+| `0` | Draft | En cours de création |
+| `1` | InProduction | Assigné, en production |
+| `2` | InReview | Soumis pour révision interne |
+| `3` | Approved | Approuvé |
+| `4` | Scheduled | Planifié pour publication |
+| `5` | Published | Publié |
+| `6` | PublishFailed | Échec de publication |
+| `7` | Archived | Archivé |
+
+---
+
+### 4.5 Envoyer un message sur un contenu
+```http
+POST /api/messages/contents/{contentId}
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "body": "Peux-tu retravailler le 2ème slide ? Trop de texte."
+}
+```
+
+---
+
+## Phase 5 — Validation
+
+### 5.1 Approbation interne (équipe)
+```http
+POST /api/approvals/internal
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "contentItemId": "<contentId>",
+  "decision": "approved",
+  "comment": "Parfait, prêt pour le client."
+}
+```
+**Décisions :** `approved | changes_requested`
+
+---
+
+### 5.2 Générer un token portail pour le client
+```http
+POST /api/clients/{clientId}/portal-tokens
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "contentItemId": "<contentId>",
+  "campaignId": "<campaignId>",
+  "expiryHours": 72
+}
+```
+**Réponse 201 :** `{ token, portalUrl }` → Envoie le `portalUrl` au client.
+
+---
+
+### 5.3 Le client consulte le portail (sans auth JWT)
+```http
+GET /api/portal/{token}
+```
+
+---
+
+### 5.4 Le client soumet sa décision
+```http
+POST /api/portal/{token}/decisions
+Content-Type: application/json
+
+{
+  "contentItemId": "<contentId>",
+  "decision": "approved",
+  "comment": "Super !"
+}
+```
+**Décisions :** `approved | changes_requested`
+
+---
+
+## Phase 6 — Publication
+
+### 6.1 Planifier une publication
+```http
+POST /api/publications/schedule
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "contentItemId": "<contentId>",
+  "platform": 0,
+  "scheduledAt": "2026-06-15T10:00:00Z"
+}
+```
+**Plateformes SocialPlatform :** `0=Instagram | 1=LinkedIn | 2=TikTok | 3=Twitter | 4=Facebook | 5=YouTube`
+
+---
+
+### 6.2 Publier immédiatement
+```http
+POST /api/publications/{publicationId}/publish
+Authorization: Bearer <token>
+```
+
+---
+
+### 6.3 Relancer une publication échouée
+```http
+POST /api/publications/{publicationId}/retry
+Authorization: Bearer <token>
+```
+
+---
+
+### 6.4 Consulter les performances
+```http
+GET /api/performance/campaigns/{campaignId}/summary
+Authorization: Bearer <token>
+```
+
+---
+
+## Phase 7 — Portail Client
+
+> Voir Phase 5.2 à 5.4 pour le flux complet portail.
+
+---
+
+## Phase 8 — Missions
+
+Les missions sont des projets freelance indépendants des campagnes.
+
+### 8.1 Créer une mission
+```http
+POST /api/missions
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Refonte identité visuelle",
+  "description": "Logo + charte graphique",
+  "startDate": "2026-05-01T00:00:00Z",
+  "endDate": "2026-07-01T00:00:00Z",
+  "budget": 5000
+}
+```
+
+### 8.2 Avancement de la mission
+```http
+PATCH /api/missions/{missionId}/status
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "id": "<missionId>",
+  "status": 1
+}
+```
+
+**Statuts MissionStatus :**
+| Valeur | Nom |
+|--------|-----|
+| `0` | Brief |
+| `1` | Production |
+| `2` | Delivery |
+| `3` | Validation |
+| `4` | Invoicing |
+| `5` | Closed |
+
+---
+
+## 🔑 Workflow Rôles & Permissions
+
+### Rôles système (non supprimables)
+
+| Rôle | Usage |
+|------|-------|
+| `Admin` | Accès complet à toutes les fonctionnalités |
+| `FreelancerOwner` | Propriétaire du workspace (auto-inscription) |
+| `Strategist` | Stratégie de campagne et planification |
+| `Planner` | Planification éditoriale et calendrier |
+| `Designer` | Création d'assets et production visuelle |
+| `ClientProxy` | Accès portail client pour approbation uniquement |
+
+---
+
+### Étape A — Lister les permissions disponibles
+```http
+GET /api/admin/permissions
+Authorization: Bearer <admin_token>
+```
+**Réponse :** Liste de tous les codes de permission du système.
+
+---
+
+### Étape B — Lister les rôles existants
+```http
+GET /api/admin/roles
+Authorization: Bearer <admin_token>
+```
+
+---
+
+### Étape C — Créer un rôle custom
+```http
+POST /api/admin/roles
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "name": "SocialMediaSpecialist",
+  "permissionCodes": [
+    "content.create",
+    "content.read",
+    "publications.schedule",
+    "publications.publish",
+    "performance.read"
+  ]
+}
+```
+**Réponse 201 :** `{ id: "<roleId>", name, permissions: [...] }`
+
+---
+
+### Étape D — Modifier les permissions d'un rôle
+```http
+PUT /api/admin/roles/{roleId}/permissions
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "permissionCodes": [
+    "content.create",
+    "content.read",
+    "content.update",
+    "approvals.review",
+    "publications.schedule",
+    "publications.publish",
+    "performance.read"
+  ]
+}
+```
+
+---
+
+### Étape E — Assigner un rôle à un utilisateur
+```http
+PUT /api/admin/users/{userId}/workspaces/{workspaceId}/role
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "roleName": "SocialMediaSpecialist"
+}
+```
+
+---
+
+### Étape F — Supprimer un rôle custom
+```http
+DELETE /api/admin/roles/{roleId}
+Authorization: Bearer <admin_token>
+```
+> ⚠️ Les rôles système ne peuvent pas être supprimés.
+
+---
+
+## 🗂️ Résumé visuel du workflow principal
+
+```
+[0] LOGIN ──────────────────────────────────────────────────────────────────────
+        │
+        ▼
+[1] WORKSPACE ──► Inviter des membres ──► Assigner des rôles
+        │
+        ▼
+[2] STRATÉGIE ──► Créer Client ──► Créer Campagne ──► Définir KPIs
+        │
+        ▼
+[3] PLANIFICATION ──► Vérifier capacité ──► Créer entrée calendrier ──► Valider
+        │
+        ▼
+[4] PRODUCTION ──► Créer contenu ──► Assigner tâches ──► Uploader assets
+        │
+        ▼
+[5] VALIDATION ──► Approbation interne ──► Token portail ──► Décision client
+        │
+        ▼
+[6] PUBLICATION ──► Planifier ──► Publier ──► Suivre performances
+```
+
+---
+
+## ⚠️ Notes importantes
+
+1. **Header requis sur tous les endpoints protégés :**
+   ```
+   Authorization: Bearer <accessToken>
+   ```
+
+2. **Le token expire après 60 minutes** — utilise `/api/auth/refresh` pour le renouveler.
+
+3. **Politique `AdminOnly`** — requiert le rôle `FreelancerOwner` ou `Admin` dans le workspace.
+
+4. **Politique `CanManageContent`** — requiert la permission `CanManageContent` dans le rôle.
+
+5. **Politique `CanPublish`** — requiert la permission `CanPublish` dans le rôle.
+
+6. **Politique `CanApprove`** — requiert la permission `CanApprove` dans le rôle.
