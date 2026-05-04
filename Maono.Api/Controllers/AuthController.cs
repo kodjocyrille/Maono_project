@@ -177,6 +177,23 @@ public class AuthController : ControllerBase
             return DeviceType.Api;
         return DeviceType.Laptop;
     }
+
+    // ── My Workspaces ─────────────────────────────────────────
+
+    /// <summary>
+    /// Récupère tous les workspaces auxquels l'utilisateur connecté appartient,
+    /// avec son rôle et le statut par défaut dans chacun.
+    /// </summary>
+    [Authorize]
+    [HttpGet("me/workspaces")]
+    public async Task<IActionResult> GetMyWorkspaces()
+    {
+        var result = await _mediator.Send(new Application.Features.Workspaces.Queries.GetMyWorkspacesQuery());
+        if (!result.IsSuccess)
+            return BadRequest(ApiResponse<object>.Error(result.Error!, 400));
+
+        return Ok(ApiResponse<object>.Ok(result.Value!, "Workspaces récupérés"));
+    }
 }
 
 // ── Request DTOs ────────────────────────────────────────────

@@ -38,3 +38,14 @@ public record InviteMemberResultDto(
     MemberDto Member,
     string InviteToken
 );
+
+public record MyWorkspaceDto(
+    Guid WorkspaceId,
+    string Name,
+    string Slug,
+    string? Plan,
+    string? LogoUrl,
+    string RoleName,
+    bool IsDefault,
+    DateTime JoinedAtUtc
+);

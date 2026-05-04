@@ -1,3 +1,4 @@
+using Maono.Application.Common.Interfaces;
 using Maono.Application.Common.Models;
 using Maono.Application.Features.Workspaces.Commands;
 using Maono.Application.Features.Workspaces.DTOs;
@@ -83,6 +84,39 @@ public class ListWorkspacesHandler : IRequestHandler<ListWorkspacesQuery, Result
         var workspaces = await _repo.GetAllAsync(ct);
         var dtos = workspaces.Select(ws => new WorkspaceDto(
             ws.Id, ws.Name, ws.Slug, ws.Plan, ws.DefaultTimezone, ws.LogoUrl, ws.CreatedAtUtc)).ToList();
+        return Result.Success(dtos);
+    }
+}
+
+public class GetMyWorkspacesHandler : IRequestHandler<GetMyWorkspacesQuery, Result<List<MyWorkspaceDto>>>
+{
+    private readonly IMembershipRepository _membershipRepo;
+    private readonly ICurrentUserService _currentUser;
+
+    public GetMyWorkspacesHandler(IMembershipRepository membershipRepo, ICurrentUserService currentUser)
+    {
+        _membershipRepo = membershipRepo;
+        _currentUser = currentUser;
+    }
+
+    public async Task<Result<List<MyWorkspaceDto>>> Handle(GetMyWorkspacesQuery request, CancellationToken ct)
+    {
+        if (_currentUser.UserId is null)
+            return Result.Failure<List<MyWorkspaceDto>>("Utilisateur non authentifié.", "UNAUTHORIZED");
+
+        var memberships = await _membershipRepo.GetByUserIdAsync(_currentUser.UserId.Value, ct);
+
+        var dtos = memberships.Select(m => new MyWorkspaceDto(
+            m.WorkspaceId,
+            m.Workspace?.Name ?? "",
+            m.Workspace?.Slug ?? "",
+            m.Workspace?.Plan,
+            m.Workspace?.LogoUrl,
+            m.Role?.Name ?? "",
+            m.IsDefault,
+            m.JoinedAtUtc
+        )).ToList();
+
         return Result.Success(dtos);
     }
 }
