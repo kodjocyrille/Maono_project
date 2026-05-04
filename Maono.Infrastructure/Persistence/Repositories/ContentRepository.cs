@@ -9,11 +9,17 @@ public class ContentRepository : BaseRepository<ContentItem>, IContentRepository
 {
     public ContentRepository(MaonoDbContext context) : base(context) { }
 
+    public override async Task<IReadOnlyList<ContentItem>> GetAllAsync(CancellationToken ct = default)
+        => await DbSet
+            .Include(c => c.CalendarEntry)
+            .ToListAsync(ct);
+
     public async Task<ContentItem?> GetWithDetailsAsync(Guid id, CancellationToken ct = default)
         => await DbSet
             .Include(c => c.Briefs)
             .Include(c => c.ChecklistItems)
             .Include(c => c.Assets)
+            .Include(c => c.CalendarEntry)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
     public async Task<IReadOnlyList<ContentItem>> GetByStatusAsync(ContentStatus status, CancellationToken ct = default)

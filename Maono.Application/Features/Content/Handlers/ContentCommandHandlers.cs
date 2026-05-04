@@ -36,7 +36,9 @@ public class CreateContentHandler : IRequestHandler<CreateContentCommand, Result
 
         return Result.Success(new ContentItemDto(
             item.Id, item.Title, item.Format, item.Status,
-            item.Deadline, item.Priority, item.CurrentRevisionNumber, item.CreatedAtUtc));
+            item.Deadline, item.Priority, item.CurrentRevisionNumber,
+            item.CalendarEntryId, item.CalendarEntry?.CampaignId,
+            item.CreatedAtUtc));
     }
 }
 
@@ -117,7 +119,9 @@ public class UpdateContentStatusHandler : IRequestHandler<UpdateContentStatusCom
 
         return Result.Success(new ContentItemDto(
             item.Id, item.Title, item.Format, item.Status,
-            item.Deadline, item.Priority, item.CurrentRevisionNumber, item.CreatedAtUtc));
+            item.Deadline, item.Priority, item.CurrentRevisionNumber,
+            item.CalendarEntryId, item.CalendarEntry?.CampaignId,
+            item.CreatedAtUtc));
     }
 }
 
@@ -172,7 +176,8 @@ public class GetContentByDeadlineHandler : IRequestHandler<Queries.GetContentByD
     {
         var items = await _repo.GetApproachingDeadlineAsync(request.Deadline, ct);
         var dtos = items.Select(i => new ContentItemDto(
-            i.Id, i.Title, i.Format, i.Status, i.Deadline, i.Priority, i.CurrentRevisionNumber, i.CreatedAtUtc)).ToList();
+            i.Id, i.Title, i.Format, i.Status, i.Deadline, i.Priority, i.CurrentRevisionNumber,
+            i.CalendarEntryId, i.CalendarEntry?.CampaignId, i.CreatedAtUtc)).ToList();
         return Result.Success(dtos);
     }
 }

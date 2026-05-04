@@ -23,7 +23,8 @@ public class GetContentByIdHandler : IRequestHandler<GetContentByIdQuery, Result
         return Result.Success(new ContentItemDetailDto(
             item.Id, item.Title, item.Format, item.Status,
             item.Deadline, item.Priority, item.CurrentRevisionNumber,
-            item.CalendarEntryId, item.CreatedAtUtc, briefs, checklist));
+            item.CalendarEntryId, item.CalendarEntry?.CampaignId,
+            item.CreatedAtUtc, briefs, checklist));
     }
 }
 
@@ -38,7 +39,9 @@ public class ListContentHandler : IRequestHandler<ListContentQuery, Result<List<
         var items = await _repo.GetAllAsync(ct);
         var dtos = items.Select(i => new ContentItemDto(
             i.Id, i.Title, i.Format, i.Status,
-            i.Deadline, i.Priority, i.CurrentRevisionNumber, i.CreatedAtUtc)).ToList();
+            i.Deadline, i.Priority, i.CurrentRevisionNumber,
+            i.CalendarEntryId, i.CalendarEntry?.CampaignId,
+            i.CreatedAtUtc)).ToList();
         return Result.Success(dtos);
     }
 }

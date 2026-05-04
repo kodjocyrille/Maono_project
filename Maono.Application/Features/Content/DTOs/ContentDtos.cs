@@ -10,6 +10,8 @@ public record ContentItemDto(
     DateTime? Deadline,
     int Priority,
     int CurrentRevisionNumber,
+    Guid? CalendarEntryId,
+    Guid? CampaignId,
     DateTime CreatedAtUtc
 );
 
@@ -22,6 +24,7 @@ public record ContentItemDetailDto(
     int Priority,
     int CurrentRevisionNumber,
     Guid? CalendarEntryId,
+    Guid? CampaignId,
     DateTime CreatedAtUtc,
     List<BriefDto> Briefs,
     List<ChecklistItemDto> ChecklistItems
